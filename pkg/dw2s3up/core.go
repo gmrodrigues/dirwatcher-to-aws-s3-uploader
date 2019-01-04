@@ -1,6 +1,7 @@
 package dw2s3up
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"go.uber.org/zap"
 )
 
 const (
@@ -33,11 +35,10 @@ type File struct {
 }
 
 type WatcherEvent struct {
-	File    *File
 	Type    string //  Create, Write, Remove, Rename,  Chmod, Pushed
+	File    *File
 	Stat    FileInfo
 	Watcher *Watcher
-	Meta    interface{}
 }
 
 type Watcher struct {
@@ -47,6 +48,7 @@ type Watcher struct {
 	subs    []chan WatcherEvent
 	pushed  chan File
 	metaMap map[string]interface{}
+	logger  *zap.Logger
 }
 
 type FileInfo struct {
@@ -77,8 +79,10 @@ func NewWatcherEventChan() chan WatcherEvent {
 func NewWatchable(dirName string) (wtb Watchable, err error) {
 	w := &Watcher{dirName: dirName}
 	w.watcher, err = fsnotify.NewWatcher()
+	w.logger, _ = zap.NewProduction()
+	defer w.logger.Sync()
 	if err != nil {
-		log.Fatal(err)
+		w.logger.Fatal(err.Error())
 
 	}
 
@@ -102,15 +106,18 @@ func (w *Watcher) Done() error {
 }
 
 func (w *Watcher) Start() error {
+	defer w.logger.Sync()
 	defer w.watcher.Close()
 	dirGlobs, _ := filepath.Glob(fmt.Sprintf("%s/*", w.Dirname()))
-	log.Printf("Glob matches %s: %#v", w.Dirname(), dirGlobs)
+	w.logger.Info(fmt.Sprintf("Glob matches %s: %#v\n", w.Dirname(), dirGlobs))
 
 	for _, f := range dirGlobs {
-		w.pushed <- File{Name: f}
+		go func() { w.pushed <- File{Name: f} }()
 	}
 
 	handle := func(file File, op string) (WatcherEvent, error) {
+		defer w.logger.Sync()
+
 		if file.Meta == nil {
 			file.Meta = w.metaMap[file.Name]
 		}
@@ -145,6 +152,9 @@ func (w *Watcher) Start() error {
 			}()
 		}
 
+		json, _ := json.MarshalIndent(e, "", "  ")
+		w.logger.Info(fmt.Sprintf("\n%s\n", json))
+
 		return e, nil
 	}
 
@@ -155,25 +165,27 @@ func (w *Watcher) Start() error {
 		case event, ok := <-w.watcher.Events:
 			if ok {
 				e, _ := handle(File{Name: event.Name}, fsNotfyOpToStr[event.Op])
-				log.Printf("event: %#v %#v \n", e, event)
+				w.logger.Info(fmt.Sprintf("\nevent: %#v %#v \n", e, event))
 			}
 		case err, ok := <-w.watcher.Errors:
 			if !ok {
 				if err != nil {
-					log.Printf("Err: %s\n", err.Error())
+					w.logger.Error(fmt.Sprintf("Err: %s\n", err.Error()))
 				}
 			}
 		case file := <-w.pushed:
 			e, _ := handle(file, PUSHED)
-			log.Printf("event: %#v %#v \n", e, event)
+			w.logger.Info(fmt.Sprintf("\npushed: %#v %#v \n", e, file))
 		case <-time.After(time.Minute):
-			log.Printf("Timout\n")
+			w.logger.Info(fmt.Sprintf("\nTimout\n"))
 		}
 	}
 }
 
 func (w *Watcher) AddFile(file File) (err error) {
-	log.Printf("AddFileWithMeta: %s", file.Name)
+	defer w.logger.Sync()
+
+	w.logger.Debug(fmt.Sprintf("AddFileWithMeta: %s\n", file.Name))
 	if w.metaMap[file.Name] == nil {
 		err = w.watcher.Add(file.Name)
 		if err != nil {
@@ -194,7 +206,9 @@ func (w *Watcher) ForcePushFile(file File) (err error) {
 }
 
 func (w *Watcher) ForgetFile(filename string) (file File, err error) {
-	log.Printf("ForgetFile: %s", filename)
+	defer w.logger.Sync()
+
+	w.logger.Debug(fmt.Sprintf("ForgetFile: %s\n", filename))
 	err = w.watcher.Remove(filename)
 	meta := w.metaMap[filename]
 	if meta != nil {
@@ -217,10 +231,10 @@ func (w *Watcher) SubscribeChan(ch chan WatcherEvent) error {
 }
 
 func (w *Watcher) SubscribeFunc(f func(e WatcherEvent)) error {
-	defer fmt.Println("Finish")
+	defer w.logger.Info("Finish")
+	defer w.logger.Sync()
 
 	go func() {
-		defer fmt.Println("Yay")
 		ch := NewWatcherEventChan()
 		t := make(chan bool, 100) // 100 func threads
 		defer close(t)
@@ -268,7 +282,7 @@ func (we *WatcherEvent) isPushed() bool {
 }
 
 func (we *WatcherEvent) tick() bool {
-	if we.isCreate() {
+	if we.isCreate() || we.isPushed() {
 		we.Watcher.AddFile(*we.File)
 	} else if !we.Stat.Exists {
 		we.Watcher.ForgetFile(we.File.Name)

@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/gmrodrigues/dirwatcher-to-aws-s3-uploader/pkg/dw2s3up"
+	"github.com/goinggo/tracelog"
 )
 
 func TestTimeConsuming(t *testing.T) {
+	tracelog.Start(tracelog.LevelTrace)
 	dirname := "test"
 	fmt.Printf("File %s\n", dirname)
 	w, err := dw2s3up.NewWatchable(dirname)
@@ -18,7 +20,7 @@ func TestTimeConsuming(t *testing.T) {
 
 	fmt.Println("Subscribing ...")
 	w.SubscribeFunc(func(e dw2s3up.WatcherEvent) {
-		fmt.Printf("File %s: %s", e.Filename, e.Type)
+		fmt.Printf("File %s: %s", e.File.Name, e.Type)
 	})
 
 	fmt.Println("Starting ...")

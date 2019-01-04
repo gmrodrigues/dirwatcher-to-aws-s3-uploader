@@ -29,6 +29,14 @@
   name = "github.com/fsnotify/fsnotify"
   version = "1.4.7"
 
+[[constraint]]
+  branch = "master"
+  name = "github.com/goinggo/tracelog"
+
+[[constraint]]
+  name = "go.uber.org/zap"
+  version = "1.9.1"
+
 [prune]
   go-tests = true
   unused-packages = true
