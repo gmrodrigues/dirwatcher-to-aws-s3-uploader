@@ -1,7 +1,6 @@
 package dw2s3up
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"go.uber.org/zap"
+	yaml "gopkg.in/yaml.v2"
 )
 
 const (
@@ -79,7 +79,7 @@ func NewWatcherEventChan() chan WatcherEvent {
 func NewWatchable(dirName string) (wtb Watchable, err error) {
 	w := &Watcher{dirName: dirName}
 	w.watcher, err = fsnotify.NewWatcher()
-	w.logger, _ = zap.NewProduction()
+	w.logger, _ = zap.NewDevelopment()
 	defer w.logger.Sync()
 	if err != nil {
 		w.logger.Fatal(err.Error())
@@ -152,8 +152,8 @@ func (w *Watcher) Start() error {
 			}()
 		}
 
-		json, _ := json.MarshalIndent(e, "", "  ")
-		w.logger.Info(fmt.Sprintf("\n%s\n", json))
+		yaml, _ := yaml.Marshal(e)
+		w.logger.Info(fmt.Sprintf("\n%s\n", yaml))
 
 		return e, nil
 	}
@@ -165,19 +165,19 @@ func (w *Watcher) Start() error {
 		case event, ok := <-w.watcher.Events:
 			if ok {
 				e, _ := handle(File{Name: event.Name}, fsNotfyOpToStr[event.Op])
-				w.logger.Info(fmt.Sprintf("\nevent: %#v %#v \n", e, event))
+				w.logger.Debug(fmt.Sprintf("event: %#v %#v", e, event))
 			}
 		case err, ok := <-w.watcher.Errors:
 			if !ok {
 				if err != nil {
-					w.logger.Error(fmt.Sprintf("Err: %s\n", err.Error()))
+					w.logger.Error(fmt.Sprintf("Err: %s", err.Error()))
 				}
 			}
 		case file := <-w.pushed:
 			e, _ := handle(file, PUSHED)
-			w.logger.Info(fmt.Sprintf("\npushed: %#v %#v \n", e, file))
+			w.logger.Debug(fmt.Sprintf("pushed: %#v %#v", e, file))
 		case <-time.After(time.Minute):
-			w.logger.Info(fmt.Sprintf("\nTimout\n"))
+			w.logger.Debug(fmt.Sprintf("Timout"))
 		}
 	}
 }
