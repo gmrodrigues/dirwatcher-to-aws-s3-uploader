@@ -18,6 +18,41 @@
   revision = "c71e233f94bd5df438d6a1f215858bda9c1e7502"
 
 [[projects]]
+  digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
+  name = "github.com/jessevdk/go-flags"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "c6ca198ec95c841fdb89fc0de7496fed11ab854e"
+  version = "v1.4.0"
+
+[[projects]]
+  digest = "1:9d7b1f07e44cada28e6160cb0a808ad2f71f32bd7114793fb0baa302db0e6229"
+  name = "github.com/opentracing/opentracing-go"
+  packages = [
+    ".",
+    "log",
+  ]
+  pruneopts = "UT"
+  revision = "1949ddbfd147afd4d964a9f00b24eb291e0e7c38"
+  version = "v1.0.2"
+
+[[projects]]
+  digest = "1:5e73b34a27d827212102605789de00bd411b2e434812133c83935fe9897c75e1"
+  name = "github.com/philhofer/fwd"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "bb6d471dc95d4fe11e432687f8b70ff496cf3136"
+  version = "v1.0.0"
+
+[[projects]]
+  digest = "1:c97e8a5e5c435c3287f581cdb4441ba34577ec6ead8422bfedafa6269af7abf6"
+  name = "github.com/tinylib/msgp"
+  packages = ["msgp"]
+  pruneopts = "UT"
+  revision = "af6442a0fcf6e2a1b824f70dd0c734f01e817751"
+  version = "v1.1.0"
+
+[[projects]]
   digest = "1:777e729b475d3895c7229552aa10076f0d177daf37c0a72258006d046d329960"
   name = "go.uber.org/atomic"
   packages = ["."]
@@ -50,11 +85,44 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:5004e851e5eccde563d17871cd9d11c82e2faa578b1a0de81dc74867ad3845a4"
-  name = "golang.org/x/sys"
-  packages = ["unix"]
+  digest = "1:76ee51c3f468493aff39dbacc401e8831fbb765104cbf613b89bef01cf4bad70"
+  name = "golang.org/x/net"
+  packages = ["context"]
   pruneopts = "UT"
-  revision = "82a175fd1598e8a172e58ebdf5ed262bb29129e5"
+  revision = "1e06a53dbb7e2ed46e91183f219db23c6943c532"
+
+[[projects]]
+  branch = "master"
+  digest = "1:5ee4df7ab18e945607ac822de8d10b180baea263b5e8676a1041727543b9c1e4"
+  name = "golang.org/x/sys"
+  packages = [
+    "unix",
+    "windows",
+  ]
+  pruneopts = "UT"
+  revision = "48ac38b7c8cbedd50b1613c0fccacfc7d88dfcdf"
+
+[[projects]]
+  digest = "1:e1485ae61dac9a4e016867c376d7348e33e469dfae1d686a5da24cb526ad3c35"
+  name = "gopkg.in/DataDog/dd-trace-go.v1"
+  packages = [
+    "ddtrace",
+    "ddtrace/ext",
+    "ddtrace/internal",
+    "ddtrace/opentracer",
+    "ddtrace/tracer",
+  ]
+  pruneopts = "UT"
+  revision = "7fb2bce4b1ed6ab61f7a9e1be30dea56de19db7c"
+  version = "v1.8.0"
+
+[[projects]]
+  digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
+  name = "gopkg.in/yaml.v2"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
+  version = "v2.2.2"
 
 [solve-meta]
   analyzer-name = "dep"
@@ -62,7 +130,13 @@
   input-imports = [
     "github.com/fsnotify/fsnotify",
     "github.com/goinggo/tracelog",
+    "github.com/jessevdk/go-flags",
+    "github.com/opentracing/opentracing-go",
     "go.uber.org/zap",
+    "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext",
+    "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/opentracer",
+    "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer",
+    "gopkg.in/yaml.v2",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
