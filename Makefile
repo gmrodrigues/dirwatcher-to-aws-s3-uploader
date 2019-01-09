@@ -16,7 +16,7 @@
 BIN := feventwatcher
 
 # This repo's root import path (under GOPATH).
-PKG := github.com/thockin/go-build-template
+PKG := github.com/gmrodrigues/feventwatcher
 
 # Where to push the docker image.
 REGISTRY ?= thockin
