@@ -2,7 +2,6 @@ package feventwatcher
 
 import (
 	"fmt"
-	"sync"
 	"time"
 )
 
@@ -11,10 +10,10 @@ type cooldownTimer struct {
 	timeUpdated     time.Time
 	countdownMillis uint64
 	done            bool
-	notifyDone      chan bool
+	renew           chan bool
 	data            interface{}
 	onDone          func(t CooldownTimer)
-	mutex           sync.Mutex
+	lock            Lockable
 }
 
 type CooldownTimer interface {
@@ -27,7 +26,7 @@ type CooldownTimer interface {
 	CountdownMillis() uint64
 }
 
-func NewCooldownTime(countdownMillis uint64, data interface{}) (CooldownTimer, error) {
+func NewCooldownTime(id string, countdownMillis uint64, data interface{}) (CooldownTimer, error) {
 	now := time.Now()
 	t := &cooldownTimer{
 		countdownMillis: countdownMillis,
@@ -35,7 +34,8 @@ func NewCooldownTime(countdownMillis uint64, data interface{}) (CooldownTimer, e
 		timeCreated:     now,
 		timeUpdated:     now,
 		done:            countdownMillis == 0,
-		notifyDone:      make(chan bool),
+		renew:           make(chan bool),
+		lock:            NewLockable(id),
 	}
 
 	fmt.Printf("countdownDuration %v", countdownMillis)
@@ -44,35 +44,42 @@ func NewCooldownTime(countdownMillis uint64, data interface{}) (CooldownTimer, e
 }
 
 func (t *cooldownTimer) NewData(newData interface{}, mergeDataFunc func(newData interface{}, oldData interface{}) (mergedData interface{})) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
 
 	if !t.done {
+		t.lock.Lock("NewData")
 		if mergeDataFunc != nil {
 			t.data = mergeDataFunc(newData, t.data)
 		}
 		t.timeUpdated = time.Now()
-		t.notifyDone <- t.done
+		t.lock.Unlock("NewData")
+		select {
+		case t.renew <- true:
+			break
+		default:
+			break
+		}
 	}
 	return nil
 }
 
 func (t *cooldownTimer) OnDone(callback func(t CooldownTimer)) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
 
 	if t.onDone == nil {
+		t.lock.Lock("OnDone")
 		t.onDone = callback
+		t.lock.Unlock("OnDone")
+
 		go func() {
 			for {
+				// fmt.Println("\nLoop OnDone")
 				select {
 				case <-time.After(time.Duration(t.countdownMillis) * time.Millisecond):
-					fmt.Println("\nAfter")
+					// fmt.Println("\nAfter")
 					t.onDone(t)
 					return
-				case done := <-t.notifyDone:
+				case done := <-t.renew:
 					if done {
-						fmt.Println("\nDone")
+						// fmt.Println("\nDone")
 						t.onDone(t)
 						return
 					}

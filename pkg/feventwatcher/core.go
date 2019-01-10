@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -61,7 +60,7 @@ type Watcher struct {
 	metaMap       map[string]interface{}
 	coolingEvents map[string]CooldownTimer
 	logger        *zap.Logger
-	mutex         sync.Mutex
+	lock          Lockable
 }
 
 type FileInfo struct {
@@ -95,7 +94,7 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 	w.logger, _ = zap.NewDevelopment()
 	defer w.logger.Sync()
 	if err != nil {
-		w.logger.Fatal(err.Error())
+		// w.logger.Fatal(err.Error())
 
 	}
 
@@ -104,6 +103,7 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 	w.subs = make([]chan WatcherEvent, 1)
 	w.metaMap = make(map[string]interface{})
 	w.coolingEvents = make(map[string]CooldownTimer)
+	w.lock = NewLockable(fmt.Sprintf("watch:%s", conf.BaseDir))
 
 	err = w.watcher.Add(w.conf.BaseDir)
 	if err != nil {
@@ -123,7 +123,7 @@ func (w *Watcher) Start() error {
 	defer w.logger.Sync()
 	defer w.watcher.Close()
 	dirGlobs, _ := filepath.Glob(fmt.Sprintf("%s/*", w.conf.BaseDir))
-	w.logger.Info(fmt.Sprintf("Glob matches %s: %#v\n", w.conf.BaseDir, dirGlobs))
+	// w.logger.Info(fmt.Sprintf("Glob matches %s: %#v\n", w.conf.BaseDir, dirGlobs))
 
 	pushGlob := func(fname string) {
 		w.pushed <- File{Name: fname}
@@ -151,7 +151,10 @@ func (w *Watcher) Start() error {
 
 	onCoolDownDone := func(ct CooldownTimer) {
 		e := ct.Data().(WatcherEvent)
+		w.lock.Lock("remove cooldown")
 		delete(e.watcher.coolingEvents, e.File.Name)
+		w.lock.Unlock("remove cooldown")
+
 		notify := func(s chan WatcherEvent) {
 			s <- e
 		}
@@ -165,7 +168,7 @@ func (w *Watcher) Start() error {
 	}
 
 	handle := func(file File, op string) (WatcherEvent, error) {
-		defer w.logger.Sync()
+		// defer w.logger.Sync()
 
 		if file.Meta == nil {
 			file.Meta = w.metaMap[file.Name]
@@ -196,7 +199,7 @@ func (w *Watcher) Start() error {
 			Time:    now,
 		}
 		e.tick()
-		//w.logger.Debug(fmt.Sprintf("event: %#v", e))
+		//// w.logger.Debug(fmt.Sprintf("event: %#v", e))
 		c := e.instanceOfCooldown()
 		c.NewData(e, cooldownEventMerge)
 		c.OnDone(onCoolDownDone)
@@ -215,21 +218,21 @@ func (w *Watcher) Start() error {
 		case err, ok := <-w.watcher.Errors:
 			if !ok {
 				if err != nil {
-					w.logger.Error(fmt.Sprintf("Err: %s", err.Error()))
+					// w.logger.Error(fmt.Sprintf("Err: %s", err.Error()))
 				}
 			}
 		case file := <-w.pushed:
 			go handle(file, PUSHED)
 		case <-time.After(time.Minute):
-			w.logger.Debug(fmt.Sprintf("Timout"))
+			// w.logger.Debug(fmt.Sprintf("Timout"))
 		}
 	}
 }
 
 func (w *Watcher) AddFile(file File) (err error) {
-	defer w.logger.Sync()
+	// defer w.logger.Sync()
 
-	w.logger.Debug(fmt.Sprintf("AddFileWithMeta: %s\n", file.Name))
+	// w.logger.Debug(fmt.Sprintf("AddFileWithMeta: %s\n", file.Name))
 	if w.metaMap[file.Name] == nil {
 		err = w.watcher.Add(file.Name)
 		if err != nil {
@@ -250,9 +253,9 @@ func (w *Watcher) ForcePushFile(file File) (err error) {
 }
 
 func (w *Watcher) ForgetFile(filename string) (file File, err error) {
-	defer w.logger.Sync()
+	// defer w.logger.Sync()
 
-	w.logger.Debug(fmt.Sprintf("ForgetFile: %s\n", filename))
+	// w.logger.Debug(fmt.Sprintf("ForgetFile: %s\n", filename))
 	err = w.watcher.Remove(filename)
 	meta := w.metaMap[filename]
 	if meta != nil {
@@ -275,8 +278,8 @@ func (w *Watcher) SubscribeChan(ch chan WatcherEvent) error {
 }
 
 func (w *Watcher) SubscribeFunc(f func(e WatcherEvent)) error {
-	defer w.logger.Info("Finish")
-	defer w.logger.Sync()
+	// defer w.logger.Info("Finish")
+	// defer w.logger.Sync()
 
 	go func() {
 		ch := NewWatcherEventChan()
@@ -331,14 +334,14 @@ func (we *WatcherEvent) isPushed() bool {
 }
 
 func (we *WatcherEvent) instanceOfCooldown() CooldownTimer {
-	we.watcher.mutex.Lock()
-	defer we.watcher.mutex.Unlock()
+	we.watcher.lock.Lock("instance")
+	defer we.watcher.lock.Unlock("instance")
 
 	ce := we.watcher.coolingEvents[we.File.Name]
 	cc := we.watcher.conf.Cooldown
 	fmt.Printf("\n\nCOUNTER %v\n", cc.CounterMillis)
 	if ce == nil {
-		ce, _ = NewCooldownTime(cc.CounterMillis, *we)
+		ce, _ = NewCooldownTime(fmt.Sprintf("cooldown:%s", we.File.Name), cc.CounterMillis, *we)
 		we.watcher.coolingEvents[we.File.Name] = ce
 	}
 	return ce

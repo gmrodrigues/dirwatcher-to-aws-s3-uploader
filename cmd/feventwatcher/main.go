@@ -14,14 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package feventwatcher
+package main
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/gmrodrigues/feventwatcher/pkg/feventwatcher"
@@ -94,15 +93,28 @@ func main() {
 		span := tracer.StartSpan("watch.event.notify")
 		defer span.Finish()
 
-		rname := strings.Join(filepath.SplitList(path.Clean(e.File.Name))[:opts.Watch.ResourceNameFileDepth], "/")
+		rname := ResourceName(e.File.Name, opts.Watch.Basepath, int(opts.Watch.ResourceNameFileDepth))
 		span.SetTag(ext.ResourceName, rname)
 
-		json, _ := json.Marshal(e)
-		span.SetTag("received.json", json)
+		json, _ := json.MarshalIndent(e, "", "  ")
+		span.SetTag("received.json", string(json))
+
+		fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(json))
 	})
 
 	fmt.Println("Starting ...")
 	w.Start()
 	fmt.Println("Done!")
 	fmt.Println("Done!")
+}
+
+func ResourceName(fullpath string, basepath string, depth int) string {
+	p := strings.Replace(path.Clean(fullpath), path.Clean(basepath), path.Base(basepath), 1)
+	pathCrumbs := strings.Split(p, string(os.PathSeparator))
+	maxRange := 3
+	if len(pathCrumbs) < maxRange {
+		maxRange = len(pathCrumbs)
+	}
+
+	return strings.Join(pathCrumbs[:maxRange], "/")
 }
