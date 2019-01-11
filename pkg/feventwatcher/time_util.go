@@ -13,9 +13,10 @@ type cooldownTimer struct {
 	data            interface{}
 	newData         chan interface{}
 	notify          chan bool
-	stop            []chan bool
-	onDone          func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
+	stop            chan bool
 	mergeData       func(newData interface{}, oldData interface{}) (mergedData interface{})
+	onDone          func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
+	onClose         func()
 }
 
 type CooldownTimer interface {
@@ -26,7 +27,8 @@ type CooldownTimer interface {
 func NewCooldownTime(
 	id string, countdownMillis uint64,
 	mergeData func(newData interface{}, oldData interface{}) (mergedData interface{}),
-	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
+	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time),
+	onClose func()) (CooldownTimer, error) {
 
 	now := time.Now()
 	t := &cooldownTimer{
@@ -35,47 +37,42 @@ func NewCooldownTime(
 		timeCreated:     now,
 		timeUpdated:     now,
 		onDone:          onDone,
+		onClose:         onClose,
 		mergeData:       mergeData,
 		newData:         make(chan interface{}),
 		notify:          make(chan bool),
-		stop:            make([]chan bool, 0),
+		stop:            make(chan bool),
 	}
 
-	go t.timerLoop()
+	go t.collingLoop()
 	go t.dataLoop()
 
 	return t, nil
 }
 
-func (t *cooldownTimer) makeStopChan() chan bool {
-	ch := make(chan bool)
-	t.stop = append(t.stop, ch)
-	return ch
-}
-
-func (t *cooldownTimer) timerLoop() {
+func (t *cooldownTimer) collingLoop() {
 	fmt.Printf("Start timerLoop countdown [%s]", t.id)
-	stop := t.makeStopChan()
 StartLoop:
 	for {
 		select {
-		case <-stop:
-			fmt.Printf("Stoping countdown [%s]", t.id)
-			break StartLoop
 		case <-t.notify:
-		TimerLoop:
+		CollingLoop:
 			for {
 				select {
 				case <-time.After(time.Duration(t.countdownMillis) * time.Millisecond):
+					// Cool down enough
+					t.stop <- true
 					if t.data != nil {
 						fmt.Printf("Cooled countdown [%s]", t.id)
 						d, c, u := t.data, t.timeCreated, t.timeUpdated
 						t.data = nil
 						t.onDone(d, c, u)
 					}
-					continue StartLoop
+					break StartLoop
 				case <-t.notify:
-					continue TimerLoop
+					// Notified about new data...
+					// hot again, let's coolin' wait
+					continue CollingLoop
 				}
 			}
 		}
@@ -84,11 +81,14 @@ StartLoop:
 
 func (t *cooldownTimer) dataLoop() {
 	fmt.Printf("Start dataLoop countdown [%s]", t.id)
-	stop := t.makeStopChan()
 	for {
 		select {
-		case <-stop:
+		case <-t.stop:
 			fmt.Printf("Stoping countdown [%s]", t.id)
+			t.onClose()
+			close(t.stop)
+			close(t.notify)
+			close(t.newData)
 			return
 		case newData := <-t.newData:
 			fmt.Printf("New data on countdown [%s]", t.id)
@@ -111,14 +111,10 @@ func (t *cooldownTimer) NewData() chan interface{} {
 }
 
 func (t *cooldownTimer) Stop() error {
-	var err error = nil
-	for _, stop := range t.stop {
-		select {
-		case stop <- true:
-			continue
-		default:
-			err = fmt.Errorf("Countdowns %s already stopped", t.id)
-		}
+	select {
+	case t.stop <- true:
+		return nil
+	case <-time.After(time.Duration(5) * time.Second):
+		return fmt.Errorf("Countdowns %s already stopped", t.id)
 	}
-	return err
 }
