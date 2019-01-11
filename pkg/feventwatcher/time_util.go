@@ -6,108 +6,119 @@ import (
 )
 
 type cooldownTimer struct {
+	id              string
 	timeCreated     time.Time
 	timeUpdated     time.Time
 	countdownMillis uint64
-	done            bool
-	renew           chan bool
 	data            interface{}
-	onDone          func(t CooldownTimer)
-	lock            Lockable
+	newData         chan interface{}
+	notify          chan bool
+	stop            []chan bool
+	onDone          func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
+	mergeData       func(newData interface{}, oldData interface{}) (mergedData interface{})
 }
 
 type CooldownTimer interface {
-	NewData(newData interface{}, mergeDataFunc func(newData interface{}, oldData interface{}) (mergedData interface{})) error
-	OnDone(callback func(t CooldownTimer)) error
-	IsDone() bool
-	Data() interface{}
-	TimeCreated() time.Time
-	TimeUpdated() time.Time
-	CountdownMillis() uint64
+	NewData() chan interface{}
+	Stop() error
 }
 
-func NewCooldownTime(id string, countdownMillis uint64, data interface{}) (CooldownTimer, error) {
+func NewCooldownTime(
+	id string, countdownMillis uint64,
+	mergeData func(newData interface{}, oldData interface{}) (mergedData interface{}),
+	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
+
 	now := time.Now()
 	t := &cooldownTimer{
+		id:              id,
 		countdownMillis: countdownMillis,
-		data:            data,
 		timeCreated:     now,
 		timeUpdated:     now,
-		done:            countdownMillis == 0,
-		renew:           make(chan bool),
-		lock:            NewLockable(id),
+		onDone:          onDone,
+		mergeData:       mergeData,
+		newData:         make(chan interface{}),
+		notify:          make(chan bool),
+		stop:            make([]chan bool, 0),
 	}
 
-	fmt.Printf("countdownDuration %v", countdownMillis)
+	go t.timerLoop()
+	go t.dataLoop()
 
 	return t, nil
 }
 
-func (t *cooldownTimer) NewData(newData interface{}, mergeDataFunc func(newData interface{}, oldData interface{}) (mergedData interface{})) error {
-
-	if !t.done {
-		t.lock.Lock("NewData")
-		if mergeDataFunc != nil {
-			t.data = mergeDataFunc(newData, t.data)
-		}
-		t.timeUpdated = time.Now()
-		t.lock.Unlock("NewData")
-		select {
-		case t.renew <- true:
-			break
-		default:
-			break
-		}
-	}
-	return nil
+func (t *cooldownTimer) makeStopChan() chan bool {
+	ch := make(chan bool)
+	t.stop = append(t.stop, ch)
+	return ch
 }
 
-func (t *cooldownTimer) OnDone(callback func(t CooldownTimer)) error {
-
-	if t.onDone == nil {
-		t.lock.Lock("OnDone")
-		t.onDone = callback
-		t.lock.Unlock("OnDone")
-
-		go func() {
+func (t *cooldownTimer) timerLoop() {
+	fmt.Printf("Start timerLoop countdown [%s]", t.id)
+	stop := t.makeStopChan()
+StartLoop:
+	for {
+		select {
+		case <-stop:
+			fmt.Printf("Stoping countdown [%s]", t.id)
+			break StartLoop
+		case <-t.notify:
+		TimerLoop:
 			for {
-				// fmt.Println("\nLoop OnDone")
 				select {
 				case <-time.After(time.Duration(t.countdownMillis) * time.Millisecond):
-					// fmt.Println("\nAfter")
-					t.onDone(t)
-					return
-				case done := <-t.renew:
-					if done {
-						// fmt.Println("\nDone")
-						t.onDone(t)
-						return
+					if t.data != nil {
+						fmt.Printf("Cooled countdown [%s]", t.id)
+						d, c, u := t.data, t.timeCreated, t.timeUpdated
+						t.data = nil
+						t.onDone(d, c, u)
 					}
+					continue StartLoop
+				case <-t.notify:
+					continue TimerLoop
 				}
 			}
-		}()
-		return nil
-	} else {
-		return fmt.Errorf("OnDone callback already defined for cooldownTimer data %#v", t.data)
+		}
 	}
 }
 
-func (t *cooldownTimer) IsDone() bool {
-	return t.done
+func (t *cooldownTimer) dataLoop() {
+	fmt.Printf("Start dataLoop countdown [%s]", t.id)
+	stop := t.makeStopChan()
+	for {
+		select {
+		case <-stop:
+			fmt.Printf("Stoping countdown [%s]", t.id)
+			return
+		case newData := <-t.newData:
+			fmt.Printf("New data on countdown [%s]", t.id)
+			t.timeUpdated = time.Now()
+			if t.mergeData != nil {
+				if t.data != nil && newData != nil {
+					t.data = t.mergeData(newData, t.data)
+				} else {
+					t.data = newData
+				}
+			}
+			t.notify <- true
+			continue
+		}
+	}
 }
 
-func (t *cooldownTimer) Data() interface{} {
-	return t.data
+func (t *cooldownTimer) NewData() chan interface{} {
+	return t.newData
 }
 
-func (t *cooldownTimer) TimeCreated() time.Time {
-	return t.timeCreated
-}
-
-func (t *cooldownTimer) TimeUpdated() time.Time {
-	return t.timeUpdated
-}
-
-func (t *cooldownTimer) CountdownMillis() uint64 {
-	return t.countdownMillis
+func (t *cooldownTimer) Stop() error {
+	var err error = nil
+	for _, stop := range t.stop {
+		select {
+		case stop <- true:
+			continue
+		default:
+			err = fmt.Errorf("Countdowns %s already stopped", t.id)
+		}
+	}
+	return err
 }

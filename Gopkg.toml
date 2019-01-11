@@ -26,12 +26,20 @@
 
 
 [[constraint]]
+  branch = "master"
+  name = "github.com/beanstalkd/go-beanstalk"
+
+[[constraint]]
   name = "github.com/fsnotify/fsnotify"
   version = "1.4.7"
 
 [[constraint]]
   branch = "master"
   name = "github.com/goinggo/tracelog"
+
+[[constraint]]
+  name = "github.com/google/uuid"
+  version = "1.1.0"
 
 [[constraint]]
   name = "github.com/jessevdk/go-flags"

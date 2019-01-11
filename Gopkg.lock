@@ -2,6 +2,14 @@
 
 
 [[projects]]
+  branch = "master"
+  digest = "1:57cfa1b2801c146d64c3555549d33a8236b7eadd88f2fcc71c2ff68658838e69"
+  name = "github.com/beanstalkd/go-beanstalk"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "28608e928096371735513b8797a9776d2e114b98"
+
+[[projects]]
   digest = "1:abeb38ade3f32a92943e5be54f55ed6d6e3b6602761d74b4aab4c9dd45c18abd"
   name = "github.com/fsnotify/fsnotify"
   packages = ["."]
@@ -16,6 +24,14 @@
   packages = ["."]
   pruneopts = "UT"
   revision = "c71e233f94bd5df438d6a1f215858bda9c1e7502"
+
+[[projects]]
+  digest = "1:236d7e1bdb50d8f68559af37dbcf9d142d56b431c9b2176d41e2a009b664cda8"
+  name = "github.com/google/uuid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "9b3b1e0f5f99ae461456d768e7d301a7acdaa2d8"
+  version = "v1.1.0"
 
 [[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
@@ -89,7 +105,7 @@
   name = "golang.org/x/net"
   packages = ["context"]
   pruneopts = "UT"
-  revision = "1e06a53dbb7e2ed46e91183f219db23c6943c532"
+  revision = "be1c187aa6c66b9daa1d9461c228d17e9dd2cab7"
 
 [[projects]]
   branch = "master"
@@ -128,8 +144,10 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/beanstalkd/go-beanstalk",
     "github.com/fsnotify/fsnotify",
     "github.com/goinggo/tracelog",
+    "github.com/google/uuid",
     "github.com/jessevdk/go-flags",
     "github.com/opentracing/opentracing-go",
     "go.uber.org/zap",

@@ -5,33 +5,21 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 	yaml "gopkg.in/yaml.v2"
 )
 
-const (
-	CREATE = "CREATE"
-	WRITE  = "WRITE"
-	REMOVE = "REMOVE"
-	RENAME = "RENAME"
-	CHMOD  = "CHMOD"
-	PUSHED = "PUSHED"
-)
-
-var fsNotfyOpToStr = map[fsnotify.Op]string{
-	fsnotify.Create: CREATE,
-	fsnotify.Write:  WRITE,
-	fsnotify.Remove: REMOVE,
-	fsnotify.Rename: RENAME,
-	fsnotify.Chmod:  CHMOD,
-}
-
 type File struct {
-	Name string
-	Meta interface{}
+	Name     string
+	NormName string
+	IsDir    bool
+	Exists   bool
+	Meta     interface{}
 }
 
 type EventCooldownConf struct {
@@ -40,52 +28,61 @@ type EventCooldownConf struct {
 
 type WatcherConf struct {
 	BaseDir  string
+	DotFiles bool
 	Cooldown EventCooldownConf `default:"EventCooldownConf{}"`
 }
 
+var EVENT_FORMAT_VERSION = "2019-01-10"
+
 type WatcherEvent struct {
-	Types   map[string]time.Time // Create, Write, Remove, Rename,  Chmod, Pushed
-	File    *File
-	Stat    FileInfo
-	watcher *Watcher
-	Time    time.Time
+	Version       string
+	UUID          string
+	File          *File
+	Stat          FileInfo
+	watcher       *Watcher
+	Time          time.Time
+	FirstChange   time.Time
+	ChangeCounter uint32
+	Forced        bool
 }
 
 type Watcher struct {
-	conf          WatcherConf
-	watcher       *fsnotify.Watcher
-	done          chan bool
-	subs          []chan WatcherEvent
-	pushed        chan File
-	metaMap       map[string]interface{}
-	coolingEvents map[string]CooldownTimer
-	logger        *zap.Logger
-	lock          Lockable
+	conf               WatcherConf
+	watcher            *fsnotify.Watcher
+	done               chan bool
+	subs               []chan *WatcherEvent
+	pushed             chan string
+	coolingEvents      map[string]CooldownTimer
+	logger             *zap.Logger
+	lock               RWLock
+	onCoolDownDone     func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
+	cooldownEventMerge func(newData interface{}, oldData interface{}) (mergedData interface{})
 }
 
+var FILEINFO_FORMAT_VERSION = "2019-01-10"
+
 type FileInfo struct {
+	Version string
 	Name    string      // base name of the file
 	Size    int64       // length in bytes for regular files; system-dependent for others
 	Mode    os.FileMode // file mode bits
 	ModTime time.Time   // modification time
-	IsDir   bool        // abbreviation for Mode().IsDir()
-	Exists  bool        // file exists
 	Sys     interface{} // underlying data source (can return nil)
 }
 
 type Watchable interface {
 	Conf() WatcherConf
-	SubscribeChan(ch chan WatcherEvent) error
-	SubscribeFunc(f func(e WatcherEvent)) error
+	SubscribeChan(ch chan *WatcherEvent) error
+	SubscribeFunc(f func(e *WatcherEvent)) error
 	AddFile(file File) error
-	ForcePushFile(file File) error
-	ForgetFile(filename string) (file File, err error)
+	ForcePushFile(filename string) error
+	ForgetFile(filename string) error
 	Start() error
 	Done() error
 }
 
-func NewWatcherEventChan() chan WatcherEvent {
-	return make(chan WatcherEvent)
+func NewWatcherEventChan() chan *WatcherEvent {
+	return make(chan *WatcherEvent)
 }
 
 func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
@@ -99,11 +96,40 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 	}
 
 	w.done = make(chan bool)
-	w.pushed = make(chan File)
-	w.subs = make([]chan WatcherEvent, 1)
-	w.metaMap = make(map[string]interface{})
+	w.pushed = make(chan string, 1000)
+	w.subs = make([]chan *WatcherEvent, 1)
 	w.coolingEvents = make(map[string]CooldownTimer)
-	w.lock = NewLockable(fmt.Sprintf("watch:%s", conf.BaseDir))
+	w.lock = NewRWLock(fmt.Sprintf("watch:%s", conf.BaseDir))
+	w.onCoolDownDone = func(data interface{}, timeCreated time.Time, timeUpdated time.Time) {
+		e := data.(*WatcherEvent)
+		w.lock.WLock("remove cooldown")
+		delete(e.watcher.coolingEvents, e.File.Name)
+		w.lock.WUnlock("remove cooldown")
+
+		notify := func(s chan *WatcherEvent) {
+			s <- e
+		}
+
+		yaml, _ := yaml.Marshal(e)
+		w.logger.Info(string(yaml))
+
+		for _, sub := range w.subs {
+			go notify(sub)
+		}
+	}
+	w.cooldownEventMerge = func(newData interface{}, oldData interface{}) (mergedData interface{}) {
+		oldest := oldData.(*WatcherEvent)
+		newest := newData.(*WatcherEvent)
+
+		if oldest.Time.After(newest.Time) {
+			oldest, newest = newest, oldest
+		}
+
+		newest.ChangeCounter = oldest.ChangeCounter + 1
+		newest.FirstChange = oldest.FirstChange
+
+		return newest
+	}
 
 	err = w.watcher.Add(w.conf.BaseDir)
 	if err != nil {
@@ -126,85 +152,61 @@ func (w *Watcher) Start() error {
 	// w.logger.Info(fmt.Sprintf("Glob matches %s: %#v\n", w.conf.BaseDir, dirGlobs))
 
 	pushGlob := func(fname string) {
-		w.pushed <- File{Name: fname}
+		w.pushed <- fname
 	}
 	for _, f := range dirGlobs {
 		go pushGlob(f)
 	}
 
-	cooldownEventMerge := func(newData interface{}, oldData interface{}) (mergedData interface{}) {
-		oldest := oldData.(WatcherEvent)
-		newest := newData.(WatcherEvent)
+	handle := func(filename string, forced bool) error {
+		fmt.Printf("\n\nHandle: %s\n\n", filename)
 
-		if oldest.Time.After(newest.Time) {
-			oldest, newest = newest, oldest
+		if len(filename) == 0 {
+			return fmt.Errorf("Empty file name received")
 		}
 
-		for ty, time := range oldest.Types {
-			if _, ok := newest.Types[ty]; !ok || time.After(newest.Types[ty]) {
-				newest.Types[ty] = time
-			}
+		baseFile := filepath.Base(filename)
+		if !w.conf.DotFiles && strings.HasPrefix(baseFile, ".") {
+			return fmt.Errorf("Dotfile ignored: %s", filename)
 		}
 
-		return newest
-	}
+		w.logger.Info(fmt.Sprintf("Handling %s", filename))
 
-	onCoolDownDone := func(ct CooldownTimer) {
-		e := ct.Data().(WatcherEvent)
-		w.lock.Lock("remove cooldown")
-		delete(e.watcher.coolingEvents, e.File.Name)
-		w.lock.Unlock("remove cooldown")
-
-		notify := func(s chan WatcherEvent) {
-			s <- e
+		stat, stat_err := os.Stat(filename)
+		file := File{
+			Name:     filename,
+			NormName: filepath.Clean(filename),
+			Exists:   !os.IsNotExist(stat_err),
 		}
-
-		yaml, _ := yaml.Marshal(e)
-		w.logger.Info(string(yaml))
-
-		for _, sub := range w.subs {
-			go notify(sub)
-		}
-	}
-
-	handle := func(file File, op string) (WatcherEvent, error) {
-		// defer w.logger.Sync()
-
-		if file.Meta == nil {
-			file.Meta = w.metaMap[file.Name]
-		}
-		stat, stat_err := os.Stat(file.Name)
-		exists := !os.IsNotExist(stat_err)
 		s := FileInfo{
-			Name:   filepath.Base(file.Name),
-			Exists: exists,
+			Version: FILEINFO_FORMAT_VERSION,
+			Name:    baseFile,
 		}
-		if exists {
+		if file.Exists {
+			file.IsDir = stat.IsDir()
 			s = FileInfo{
+				Version: FILEINFO_FORMAT_VERSION,
 				Name:    stat.Name(),    // base name of the file
 				Size:    stat.Size(),    // length in bytes for regular files; system-dependent for others
 				Mode:    stat.Mode(),    // file mode bits
 				ModTime: stat.ModTime(), // modification time
-				IsDir:   stat.IsDir(),   // abbreviation for Mode().IsDir()
-				Exists:  exists,         // file exists
 				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
 		}
 		now := time.Now()
 		e := WatcherEvent{
-			File:    &file,
-			Types:   map[string]time.Time{op: now},
-			watcher: w,
-			Stat:    s,
-			Time:    now,
+			Version:     EVENT_FORMAT_VERSION,
+			UUID:        uuid.New().String(),
+			File:        &file,
+			watcher:     w,
+			Stat:        s,
+			Forced:      forced,
+			FirstChange: now,
+			Time:        now,
 		}
 		e.tick()
-		//// w.logger.Debug(fmt.Sprintf("event: %#v", e))
-		c := e.instanceOfCooldown()
-		c.NewData(e, cooldownEventMerge)
-		c.OnDone(onCoolDownDone)
 
-		return e, nil
+		return nil
 	}
 
 	for {
@@ -212,72 +214,98 @@ func (w *Watcher) Start() error {
 		case <-w.done:
 			return nil
 		case event, ok := <-w.watcher.Events:
+			forced := false
 			if ok {
-				go handle(File{Name: event.Name}, fsNotfyOpToStr[event.Op])
+				fmt.Printf("Ahew: [%s] %#v", event.Name, event)
+				go handle(event.Name, forced)
+				continue
 			}
 		case err, ok := <-w.watcher.Errors:
-			if !ok {
-				if err != nil {
-					// w.logger.Error(fmt.Sprintf("Err: %s", err.Error()))
-				}
+			if err != nil {
+				w.logger.Error(fmt.Sprintf("Err: %s", err.Error()))
+			} else {
+				w.logger.Error(fmt.Sprintf("Erro locao ok: %v", ok))
 			}
-		case file := <-w.pushed:
-			go handle(file, PUSHED)
+			continue
+		case filename := <-w.pushed:
+			forced := true
+			fmt.Printf("Woooo: [%s]", filename)
+			go handle(filename, forced)
+			continue
 		case <-time.After(time.Minute):
-			// w.logger.Debug(fmt.Sprintf("Timout"))
+			w.logger.Debug(fmt.Sprintf("Timout"))
+			continue
 		}
 	}
 }
 
 func (w *Watcher) AddFile(file File) (err error) {
-	// defer w.logger.Sync()
+	err = w.watcher.Add(file.NormName)
 
-	// w.logger.Debug(fmt.Sprintf("AddFileWithMeta: %s\n", file.Name))
-	if w.metaMap[file.Name] == nil {
-		err = w.watcher.Add(file.Name)
-		if err != nil {
-			if file.Meta != nil {
-				w.metaMap[file.Name] = file.Meta
-			} else {
-				w.metaMap[file.Name] = true
-			}
+	lock_id := fmt.Sprintf("AddFile [%s]", file.NormName)
+	w.lock.WLock(lock_id)
+	defer w.lock.WUnlock(lock_id)
+
+	ce := w.coolingEvents[file.NormName]
+	if err != nil {
+		if ce != nil {
+			ce.Stop()
+			delete(w.coolingEvents, file.NormName)
 		}
-		return err
+		w.logger.Error(fmt.Sprintf("Error adding [%s]: %s", file.Name, err.Error()))
+	} else {
+		if ce == nil && !file.IsDir {
+			cc := w.conf.Cooldown
+			fmt.Printf("\n\nCOUNTER %v\n", cc.CounterMillis)
+			ce, _ = NewCooldownTime(
+				fmt.Sprintf("cooldown:%s", file.Name),
+				cc.CounterMillis,
+				w.cooldownEventMerge,
+				w.onCoolDownDone)
+			w.coolingEvents[file.NormName] = ce
+		}
+		w.logger.Debug(fmt.Sprintf("Success adding [%s]", file.Name))
 	}
+
+	return err
+}
+
+func (w *Watcher) ForcePushFile(filename string) (err error) {
+	w.pushed <- filename
 	return nil
 }
 
-func (w *Watcher) ForcePushFile(file File) (err error) {
-	w.pushed <- file
-	return nil
-}
-
-func (w *Watcher) ForgetFile(filename string) (file File, err error) {
-	// defer w.logger.Sync()
-
-	// w.logger.Debug(fmt.Sprintf("ForgetFile: %s\n", filename))
+func (w *Watcher) ForgetFile(filename string) (err error) {
 	err = w.watcher.Remove(filename)
-	meta := w.metaMap[filename]
-	if meta != nil {
-		delete(w.metaMap, filename)
+	if err != nil {
+		w.logger.Error(fmt.Sprintf("Error removing [%s]: %s", filename, err.Error()))
+	} else {
+		w.logger.Debug(fmt.Sprintf("Success removing [%s]", filename))
 	}
-	return File{Name: filename, Meta: meta}, err
-}
 
-func (w *Watcher) contains(filename string) bool {
-	return w.metaMap[filename] != nil
+	normName := filepath.Clean(filename)
+	lock_id := fmt.Sprintf("AddFile [%s]", normName)
+	w.lock.WLock(lock_id)
+	defer w.lock.WUnlock(lock_id)
+
+	ce := w.coolingEvents[normName]
+	if ce != nil {
+		delete(w.coolingEvents, normName)
+	}
+
+	return err
 }
 
 func (w *Watcher) Conf() WatcherConf {
 	return w.conf
 }
 
-func (w *Watcher) SubscribeChan(ch chan WatcherEvent) error {
+func (w *Watcher) SubscribeChan(ch chan *WatcherEvent) error {
 	w.subs = append(w.subs, ch)
 	return nil
 }
 
-func (w *Watcher) SubscribeFunc(f func(e WatcherEvent)) error {
+func (w *Watcher) SubscribeFunc(f func(e *WatcherEvent)) error {
 	// defer w.logger.Info("Finish")
 	// defer w.logger.Sync()
 
@@ -303,55 +331,25 @@ func (w *Watcher) SubscribeFunc(f func(e WatcherEvent)) error {
 	return nil
 }
 
-// Create, Write, Remove, Rename,  Chmod
-func (we *WatcherEvent) isType(eType string) bool {
-	_, ok := we.Types[eType]
-	return ok
-}
+func (we *WatcherEvent) tick() error {
+	we.watcher.AddFile(*we.File)
 
-func (we *WatcherEvent) isCreate() bool {
-	return we.isType(CREATE)
-}
-
-func (we *WatcherEvent) isWrite() bool {
-	return we.isType(WRITE)
-}
-
-func (we *WatcherEvent) isRemove() bool {
-	return we.isType(REMOVE)
-}
-
-func (we *WatcherEvent) isRename() bool {
-	return we.isType(RENAME)
-}
-
-func (we *WatcherEvent) isChmod() bool {
-	return we.isType(CHMOD)
-}
-
-func (we *WatcherEvent) isPushed() bool {
-	return we.isType(PUSHED)
-}
-
-func (we *WatcherEvent) instanceOfCooldown() CooldownTimer {
-	we.watcher.lock.Lock("instance")
-	defer we.watcher.lock.Unlock("instance")
-
-	ce := we.watcher.coolingEvents[we.File.Name]
-	cc := we.watcher.conf.Cooldown
-	fmt.Printf("\n\nCOUNTER %v\n", cc.CounterMillis)
-	if ce == nil {
-		ce, _ = NewCooldownTime(fmt.Sprintf("cooldown:%s", we.File.Name), cc.CounterMillis, *we)
-		we.watcher.coolingEvents[we.File.Name] = ce
+	if we.File.IsDir {
+		return nil
 	}
-	return ce
-}
 
-func (we *WatcherEvent) tick() bool {
-	if we.Stat.Exists {
-		we.watcher.AddFile(*we.File)
-	} else {
-		we.watcher.ForgetFile(we.File.Name)
+	we.watcher.lock.RLock("tick")
+	defer we.watcher.lock.RUnlock("tick")
+
+	cdt := we.watcher.coolingEvents[we.File.NormName]
+	if cdt != nil {
+		select {
+		case cdt.NewData() <- we:
+			we.watcher.logger.Debug(fmt.Sprintf("Sent data about %s", we.File.Name))
+			return nil
+		case <-time.After(time.Duration(15) * time.Second):
+			return fmt.Errorf("Failed to tick event after 15 seconds: %#v", we)
+		}
 	}
-	return true
+	return nil
 }

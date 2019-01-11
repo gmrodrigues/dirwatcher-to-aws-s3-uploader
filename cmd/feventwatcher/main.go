@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/gmrodrigues/feventwatcher/pkg/feventwatcher"
+	"github.com/gmrodrigues/feventwatcher/pkg/modules/beanstalkd"
 	"github.com/goinggo/tracelog"
 	flags "github.com/jessevdk/go-flags"
 	opentracing "github.com/opentracing/opentracing-go"
@@ -44,6 +45,11 @@ type Options struct {
 		Env         string   `description:"DataDog application enviroment" long:"trace-env"`
 		Tags        []string `description:"Additional multiple ddtrace tags Ex: --xtag aws_region=virginia" long:"xtag"`
 	} `group:"ddagent" namespace:"dd" env-namespace:"DD"`
+	Beanstalkd struct {
+		Addr            string `description:"Beanstalkd (queue server) host:port (Ex: 127.0.0.1:11300)" long:"addr" env:"ADDR"`
+		Queue           string `description:"Beanstalkd queue name)" long:"queue" env:"QUEUE" default:"default"`
+		TimeToRunMillis uint32 `description:"Beanstalkd queue consumer's time to work before job return to queue)" long:"ttr" env:"TTR" default:"600000"`
+	} `group:"beanstalkd" namespace:"beanstalkd" env-namespace:"BEANSTALKD"`
 	Debug []bool `description:"Debug mode, use multiple times to raise verbosity" short:"d" long:"debug"`
 }
 
@@ -71,6 +77,33 @@ func main() {
 	defer tracer.Stop()
 	opentracing.SetGlobalTracer(t)
 
+	//////////////////////////////////
+	// Beanstalkd
+
+	bqueues, err := InitBeanstalkd(opts)
+	if err != nil {
+		panic(err)
+	}
+
+	bstalckHandle := func(pspan opentracing.Span, q beanstalkd.QueueHandler, json []byte) {
+		span := t.StartSpan("beanstalk.producer", opentracing.ChildOf(pspan.Context()))
+		defer span.Finish()
+
+		span.SetTag(ext.ResourceName, q.Conf().Name)
+		span.SetTag("queue", q.Conf().Name)
+		span.SetTag("host", q.Conn().Addr())
+
+		id, err := q.Put(json)
+		if err != nil {
+			span.LogKV("error", err)
+			return
+		}
+
+		span.LogKV("produced.id", id)
+		span.LogKV("produced.body", json)
+	}
+
+	/////////////////////////////////
 	// Start Watcher
 
 	tracelog.Start(tracelog.LevelTrace)
@@ -89,17 +122,21 @@ func main() {
 	}
 
 	fmt.Println("Starting watcher with confs: %#v", conf)
-	w.SubscribeFunc(func(e feventwatcher.WatcherEvent) {
-		span := tracer.StartSpan("watch.event.notify")
+	w.SubscribeFunc(func(e *feventwatcher.WatcherEvent) {
+		span := t.StartSpan("watch.event.notify")
 		defer span.Finish()
 
 		rname := ResourceName(e.File.Name, opts.Watch.Basepath, int(opts.Watch.ResourceNameFileDepth))
 		span.SetTag(ext.ResourceName, rname)
 
 		json, _ := json.MarshalIndent(e, "", "  ")
-		span.SetTag("received.json", string(json))
-
 		fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(json))
+
+		span.LogKV("received.json", string(json))
+
+		for _, bqueue := range bqueues {
+			bstalckHandle(span, bqueue, json)
+		}
 	})
 
 	fmt.Println("Starting ...")
@@ -117,4 +154,25 @@ func ResourceName(fullpath string, basepath string, depth int) string {
 	}
 
 	return strings.Join(pathCrumbs[:maxRange], "/")
+}
+
+func InitBeanstalkd(opts Options) ([]beanstalkd.QueueHandler, error) {
+	opt := opts.Beanstalkd
+	if len(opt.Addr) > 0 {
+		conn, err := beanstalkd.NewConnection(opt.Addr)
+		if err != nil {
+			return nil, err
+		}
+		qconf := beanstalkd.QueueConf{
+			Name:            opt.Queue,
+			TimeToRunMillis: opt.TimeToRunMillis,
+		}
+		qhand, err := conn.NewQueueHandler(qconf)
+		if err != nil {
+			return nil, err
+		}
+		return []beanstalkd.QueueHandler{qhand}, nil
+	}
+
+	return []beanstalkd.QueueHandler{}, nil
 }
