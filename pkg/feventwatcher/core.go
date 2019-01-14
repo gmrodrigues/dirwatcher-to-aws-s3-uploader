@@ -51,10 +51,11 @@ type Watcher struct {
 	watcher            *fsnotify.Watcher
 	done               chan bool
 	subs               []chan *WatcherEvent
+	in                 chan *WatcherEvent
+	out                chan *WatcherEvent
 	pushed             chan string
 	coolingEvents      map[string]CooldownTimer
 	logger             *zap.Logger
-	lock               RWLock
 	onCoolDownDone     func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
 	cooldownEventMerge func(newData interface{}, oldData interface{}) (mergedData interface{})
 }
@@ -92,21 +93,17 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 
 	}
 
+	EVENT_BUFFER_SIZE := 1024 * 1024
+	w.subs = make([]chan *WatcherEvent, 0)
+	w.in = make(chan *WatcherEvent, EVENT_BUFFER_SIZE)
+	w.out = make(chan *WatcherEvent, EVENT_BUFFER_SIZE)
+
 	w.done = make(chan bool)
 	w.pushed = make(chan string, 1000)
-	w.subs = make([]chan *WatcherEvent, 1)
 	w.coolingEvents = make(map[string]CooldownTimer)
-	w.lock = NewRWLock(fmt.Sprintf("watch:%s", conf.BaseDir))
 	w.onCoolDownDone = func(data interface{}, timeCreated time.Time, timeUpdated time.Time) {
 		e := data.(*WatcherEvent)
-
-		notify := func(s chan *WatcherEvent) {
-			s <- e
-		}
-
-		for _, sub := range w.subs {
-			go notify(sub)
-		}
+		w.out <- e
 	}
 	w.cooldownEventMerge = func(newData interface{}, oldData interface{}) (mergedData interface{}) {
 		oldest := oldData.(*WatcherEvent)
@@ -143,15 +140,6 @@ func (w *Watcher) Done() error {
 func (w *Watcher) Start() error {
 	defer w.logger.Sync()
 	defer w.watcher.Close()
-	dirGlobs, _ := filepath.Glob(path.Join(w.conf.BaseDir, "**", "*"))
-	// w.logger.Info(fmt.Sprintf("Glob matches %s: %#v\n", w.conf.BaseDir, dirGlobs))
-
-	pushGlob := func(fname string) {
-		w.pushed <- fname
-	}
-	for _, f := range dirGlobs {
-		go pushGlob(f)
-	}
 
 	handle := func(filename string, forced bool) error {
 		fmt.Printf("\n\nHandle: %s\n\n", filename)
@@ -167,47 +155,32 @@ func (w *Watcher) Start() error {
 
 		w.logger.Info(fmt.Sprintf("Handling %s", filename))
 
-		stat, stat_err := os.Stat(filename)
 		file := File{
 			Name:     filename,
 			NormName: filepath.Clean(filename),
-			Exists:   !os.IsNotExist(stat_err),
-		}
-		s := FileInfo{
-			Version: FILEINFO_FORMAT_VERSION,
-			Name:    baseFile,
-		}
-		if file.Exists {
-			file.IsDir = stat.IsDir()
-			s = FileInfo{
-				Version: FILEINFO_FORMAT_VERSION,
-				Name:    stat.Name(),    // base name of the file
-				Size:    stat.Size(),    // length in bytes for regular files; system-dependent for others
-				Mode:    stat.Mode(),    // file mode bits
-				ModTime: stat.ModTime(), // modification time
-				Sys:     stat.Sys(),     // underlying data source (can return nil)
-			}
 		}
 		now := time.Now()
-		e := WatcherEvent{
+		e := &WatcherEvent{
 			Version:     EVENT_FORMAT_VERSION,
 			UUID:        uuid.New().String(),
 			File:        &file,
 			watcher:     w,
-			Stat:        s,
 			Forced:      forced,
 			FirstChange: now,
 			Time:        now,
 		}
-		e.tick()
+		w.in <- e
+		w.logger.Info(fmt.Sprintf("Handled %s", filename))
 
 		return nil
 	}
 
+	go w.cooldownNotifyLoop()
+	go w.walkPush()
+
 	for {
+		w.logger.Debug("Main Loop")
 		select {
-		case <-w.done:
-			return nil
 		case event, ok := <-w.watcher.Events:
 			forced := false
 			if ok {
@@ -230,53 +203,96 @@ func (w *Watcher) Start() error {
 		case <-time.After(time.Minute):
 			w.logger.Debug(fmt.Sprintf("Timout"))
 			continue
+		case <-w.done:
+			defer w.Done()
+			return nil
 		}
 	}
 }
 
-func (we *WatcherEvent) keep() (err error) {
-	file := we.File
-	w := we.watcher
-	err = w.watcher.Add(file.NormName)
+func (w *Watcher) walkPush() {
+	walkVisit := func(path string, f os.FileInfo, err error) error {
+		w.logger.Info(fmt.Sprintf("Walk push %s", path))
+		w.pushed <- path
+		return nil
+	}
 
-	if file.IsDir || !file.Exists {
-		w.onCoolDownDone(we, we.Time, we.Time)
-	} else {
-		lock_id := fmt.Sprintf("AddFile [%s]", file.NormName)
-		w.lock.WLock(lock_id)
-		defer w.lock.WUnlock(lock_id)
+	err := filepath.Walk(w.conf.BaseDir, walkVisit)
+	if err != nil {
+		w.logger.Error(fmt.Sprintf("Error on Walking and Pushing files on %s: %s", w.conf.BaseDir, err.Error()))
+	}
+}
+
+func (w *Watcher) cooldownNotifyLoop() {
+
+	handleIn := func(we *WatcherEvent) {
+		file := we.File
+		w := we.watcher
+		w.watcher.Add(file.NormName)
 
 		ce := w.coolingEvents[file.NormName]
-		if err != nil {
-			if ce != nil {
-				ce.Stop()
-				delete(w.coolingEvents, file.NormName)
-			}
-			w.logger.Error(fmt.Sprintf("Error adding [%s]: %s", file.Name, err.Error()))
-		} else {
-			if ce == nil {
-				cc := w.conf.Cooldown
-				fmt.Printf("\n\nCOUNTER %v\n", cc.CounterMillis)
-				ce, _ = NewCooldownTime(
-					fmt.Sprintf("cooldown:%s", file.Name),
-					cc.CounterMillis,
-					w.cooldownEventMerge,
-					w.onCoolDownDone,
-					func() {
-						// onStop
-						defer w.logger.Debug(fmt.Sprintf("Success cooling [%s]", file.Name))
-						w.lock.WLock("remove cooldown")
-						defer w.lock.WUnlock("remove cooldown")
+		if ce == nil {
+			cc := w.conf.Cooldown
+			fmt.Printf("\n\nCOUNTER %v\n", cc.CounterMillis)
+			ce, _ = NewCooldownTime(
+				fmt.Sprintf("cooldown:%s", file.Name),
+				cc.CounterMillis,
+				w.cooldownEventMerge,
+				w.onCoolDownDone)
+			w.coolingEvents[file.NormName] = ce
+		}
+		ce.NewData() <- we
+	}
 
-						delete(w.coolingEvents, file.NormName)
-					})
-				w.coolingEvents[file.NormName] = ce
+	notify := func(we *WatcherEvent, s chan *WatcherEvent) {
+		s <- we
+	}
+
+	handleOut := func(we *WatcherEvent) {
+		file := we.File
+		delete(w.coolingEvents, file.NormName)
+
+		stat, stat_err := os.Stat(file.NormName)
+		file.Exists = !os.IsNotExist(stat_err)
+		s := FileInfo{
+			Version: FILEINFO_FORMAT_VERSION,
+			Name:    path.Base(file.NormName),
+		}
+		if file.Exists {
+			file.IsDir = stat.IsDir()
+			s = FileInfo{
+				Version: FILEINFO_FORMAT_VERSION,
+				Name:    stat.Name(),    // base name of the file
+				Size:    stat.Size(),    // length in bytes for regular files; system-dependent for others
+				Mode:    stat.Mode(),    // file mode bits
+				ModTime: stat.ModTime(), // modification time
+				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
-			w.logger.Debug(fmt.Sprintf("Success adding [%s]", file.Name))
+		}
+		we.Stat = s
+
+		for i, sub := range w.subs {
+			w.logger.Debug(fmt.Sprintf("Nofify Loop %v", i))
+			go notify(we, sub)
 		}
 	}
 
-	return err
+	for {
+		w.logger.Debug("Cooldown Loop")
+		select {
+		case we := <-w.out:
+			w.logger.Info(fmt.Sprintf("OUT file: %s", we.File.NormName))
+			handleOut(we)
+			continue
+		case <-w.done:
+			defer w.Done()
+			return
+		case we := <-w.in:
+			w.logger.Info(fmt.Sprintf("IN file: %s", we.File.NormName))
+			handleIn(we)
+			continue
+		}
+	}
 }
 
 func (w *Watcher) ForcePushFile(filename string) (err error) {
@@ -300,7 +316,6 @@ func (w *Watcher) SubscribeFunc(f func(e *WatcherEvent)) error {
 	go func() {
 		ch := NewWatcherEventChan()
 		t := make(chan bool, 100) // 100 func threads
-		defer close(t)
 
 		err := w.SubscribeChan(ch)
 		if err != nil {
@@ -309,6 +324,7 @@ func (w *Watcher) SubscribeFunc(f func(e *WatcherEvent)) error {
 		}
 
 		for {
+			w.logger.Debug("Subscription Loop")
 			e := <-ch
 			t <- true
 			f(e)
@@ -316,28 +332,5 @@ func (w *Watcher) SubscribeFunc(f func(e *WatcherEvent)) error {
 		}
 	}()
 
-	return nil
-}
-
-func (we *WatcherEvent) tick() error {
-	we.keep()
-
-	if we.File.IsDir {
-		return nil
-	}
-
-	we.watcher.lock.RLock("tick")
-	defer we.watcher.lock.RUnlock("tick")
-
-	cdt := we.watcher.coolingEvents[we.File.NormName]
-	if cdt != nil {
-		select {
-		case cdt.NewData() <- we:
-			we.watcher.logger.Debug(fmt.Sprintf("Sent data about %s", we.File.Name))
-			return nil
-		case <-time.After(time.Duration(15) * time.Second):
-			return fmt.Errorf("Failed to tick event after 15 seconds: %#v", we)
-		}
-	}
 	return nil
 }

@@ -16,7 +16,6 @@ type cooldownTimer struct {
 	stop            chan bool
 	mergeData       func(newData interface{}, oldData interface{}) (mergedData interface{})
 	onDone          func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
-	onClose         func()
 }
 
 type CooldownTimer interface {
@@ -27,8 +26,7 @@ type CooldownTimer interface {
 func NewCooldownTime(
 	id string, countdownMillis uint64,
 	mergeData func(newData interface{}, oldData interface{}) (mergedData interface{}),
-	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time),
-	onClose func()) (CooldownTimer, error) {
+	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
 
 	now := time.Now()
 	t := &cooldownTimer{
@@ -37,27 +35,27 @@ func NewCooldownTime(
 		timeCreated:     now,
 		timeUpdated:     now,
 		onDone:          onDone,
-		onClose:         onClose,
 		mergeData:       mergeData,
 		newData:         make(chan interface{}),
 		notify:          make(chan bool),
 		stop:            make(chan bool),
 	}
 
-	go t.collingLoop()
+	go t.coolingLoop()
 	go t.dataLoop()
 
 	return t, nil
 }
 
-func (t *cooldownTimer) collingLoop() {
+func (t *cooldownTimer) coolingLoop() {
 	fmt.Printf("Start timerLoop countdown [%s]", t.id)
-StartLoop:
 	for {
+		fmt.Println("Cooling Outter Loop")
 		select {
 		case <-t.notify:
 		CollingLoop:
 			for {
+				fmt.Println("Cooling Inner Loop")
 				select {
 				case <-time.After(time.Duration(t.countdownMillis) * time.Millisecond):
 					// Cool down enough
@@ -68,7 +66,8 @@ StartLoop:
 						t.data = nil
 						t.onDone(d, c, u)
 					}
-					break StartLoop
+					defer t.Stop()
+					return
 				case <-t.notify:
 					// Notified about new data...
 					// hot again, let's coolin' wait
@@ -82,13 +81,10 @@ StartLoop:
 func (t *cooldownTimer) dataLoop() {
 	fmt.Printf("Start dataLoop countdown [%s]", t.id)
 	for {
+		fmt.Println("Data Loop")
 		select {
 		case <-t.stop:
 			fmt.Printf("Stoping countdown [%s]", t.id)
-			t.onClose()
-			close(t.stop)
-			close(t.notify)
-			close(t.newData)
 			return
 		case newData := <-t.newData:
 			fmt.Printf("New data on countdown [%s]", t.id)

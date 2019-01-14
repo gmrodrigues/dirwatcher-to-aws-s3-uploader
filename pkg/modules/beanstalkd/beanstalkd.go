@@ -71,7 +71,7 @@ func NewConnection(addr string) (c Connection, err error) {
 func NewConnectionTimeout(addr string, timeout time.Duration) (c Connection, err error) {
 	conn := &conn{addr: addr}
 	conn.bConn, err = beanstalk.DialTimeout("tcp", conn.addr, timeout)
-	if err != err {
+	if err != nil {
 		return nil, err
 	}
 
@@ -133,13 +133,16 @@ func (q *queue) Put(body []byte) (id uint64, err error) {
 	defer fmt.Printf("\nPut queue ok\n")
 
 	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
 	if q.bTube == nil {
 		q.bTube = &beanstalk.Tube{
 			Conn: q.conn.bConn,
 			Name: q.conf.Name,
 		}
 	}
-	q.mutex.Unlock()
+
+	fmt.Printf("Nhe %#v\n", q.bTube)
 
 	return q.bTube.Put(body,
 		q.conf.Priority,

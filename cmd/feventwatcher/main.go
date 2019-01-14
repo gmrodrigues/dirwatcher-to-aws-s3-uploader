@@ -82,6 +82,7 @@ func main() {
 
 	bqueues, err := InitBeanstalkd(opts)
 	if err != nil {
+		//fmt.Fprintf(os.Stderr, "Beanstalkd Client error: %s", err.Error())
 		panic(err)
 	}
 
