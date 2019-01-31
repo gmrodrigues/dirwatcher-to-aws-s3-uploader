@@ -45,7 +45,6 @@ func Health(options *Options) {
 			Handler:        &healthHandler{options: options},
 			ReadTimeout:    10 * time.Second,
 			WriteTimeout:   10 * time.Second,
-			MaxHeaderBytes: 1 << 20,
 		}
 		log.Fatal(s.ListenAndServe())
 	}
@@ -63,12 +62,10 @@ func (h *healthHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	responseBody.Runtime.Hostname, _ = os.Hostname()
 	responseBody.Runtime.UptimeMillis = uptime()
 
-	data, err := json.Marshal(responseBody)
+	rw.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(rw).Encode(responseBody)
     if err != nil {
         http.Error(rw, err.Error(), http.StatusInternalServerError)
         return
     }
-    rw.WriteHeader(200)
-    rw.Header().Set("Content-Type", "application/json")
-    rw.Write(data)
 }

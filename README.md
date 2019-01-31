@@ -2,7 +2,19 @@
 
 Watches for file system events on a given directory and sends to multiple destinations (topics, queues, etc).
 
+## Health check
 
+You can set an tcp port and use it for health checking:
+
+```Shell
+
+feventwatcher [OPTIONS] -p 9123 # run command with options then set health check listening on host port 9123
+curl -XGET http://localhost:9123/health -I # check if its running
+> HTTP/1.1 200 OK
+> Content-Type: application/json
+> Date: Thu, 31 Jan 2019 09:52:08 GMT
+> Content-Length: 693
+```
 
 ## Usage
 
