@@ -58,6 +58,9 @@ type Options struct {
 		QueueKey string `description:"Redis queue name" long:"queue-key" env:"REDIS_QUEUE" default:"fsevents:queue"`
 		Db 		 int `description:"Redis DB number" long:"db" env:"REDIS_DB" default:"0"`
 	} `group:"redis" namespace:"redis" env-namespace:"REDIS"`
+	Health struct {
+		Port int `description:"Listen on port for healh check status report (GET /health)" long:"port" short:"p" env:"HEALTH_PORT"`
+	} `group:"health" namespace:"health" env-namespace:"HEALTH"`
 	Debug []bool `description:"Debug mode, use multiple times to raise verbosity" short:"d" long:"debug"`
 }
 
@@ -69,6 +72,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	Health(&opts)
 
 	tstartops := []tracer.StartOption{
 		tracer.WithAgentAddr(opts.DataDogAgent.AgentAddr),
@@ -85,6 +90,7 @@ func main() {
 	defer tracer.Stop()
 	opentracing.SetGlobalTracer(t)
 
+	
 	//////////////////////////////////
 	// Beanstalkd
 
@@ -114,8 +120,8 @@ func main() {
 			return
 		}
 
-		span.LogKV("produced.id", id)
-		span.LogKV("produced.body", json)
+		span.LogKV("id", id)
+		span.LogKV("payload", json)
 	}
 
 	redisHandle := func(pspan opentracing.Span, q redis.Queue, json []byte) {
@@ -132,7 +138,7 @@ func main() {
 			return
 		}
 
-		span.LogKV("produced.body", json)
+		span.LogKV("payload", json)
 	}
 
 	/////////////////////////////////
@@ -163,7 +169,8 @@ func main() {
 		json, _ := json.MarshalIndent(e, "", "  ")
 		fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(json))
 
-		span.LogKV("received.json", string(json))
+		span.LogKV("event", rname)
+		span.LogKV("payload", string(json))
 
 		for _, rqueue := range rqueues {
 			redisHandle(span, rqueue, json)

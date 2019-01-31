@@ -2,7 +2,7 @@
 
 Watches for file system events on a given directory and sends to multiple destinations (topics, queues, etc).
 
-See inotify for implementation details, Tested in windows and linux.
+
 
 ## Usage
 
@@ -27,7 +27,7 @@ ddagent:
 beanstalkd:
       --beanstalkd.addr=             Beanstalkd (queue server) host:port (Ex: 127.0.0.1:11300) [$BEANSTALKD_ADDR]
       --beanstalkd.queue=            Beanstalkd queue name) (default: default) [$BEANSTALKD_QUEUE]
-      --beanstalkd.ttr=              Beanstalkd queue consumer's time to work before job return to queue) (default: 600000) [$BEANSTALKD_TTR]
+      --beanstalkd.ttr=              Beanstalkd queue consumer\'s time to work before job return to queue) (default: 600000) [$BEANSTALKD_TTR]
 
 redis:
       --redis.addr=                  Redis server host:port (Ex: localhost:6379) [$REDIS_ADDR]
@@ -35,8 +35,12 @@ redis:
       --redis.queue-key=             Redis queue name (default: fsevents:queue) [$REDIS_QUEUE]
       --redis.db=                    Redis DB number (default: 0) [$REDIS_DB]
 
+health:
+  -p, --health.port=                 Listen on port for healh check status report (GET /health) [$HEALTH_PORT]
+
 Help Options:
   -h, --help                         Show this help message
+
 
 ```
 
