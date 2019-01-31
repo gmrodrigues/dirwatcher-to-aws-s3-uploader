@@ -2,6 +2,11 @@
 
 Watches for file system events on a given directory and sends to multiple destinations (topics, queues, etc).
 
+## Download
+
+Check binary multiplataform releases:
+   - [Downloads](https://github.com/gmrodrigues/feventwatcher/releases)
+
 ## Health check
 
 You can set an tcp port and use it for health checking:
