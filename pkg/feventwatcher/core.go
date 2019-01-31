@@ -19,7 +19,7 @@ type File struct {
 	NormName string
 	IsDir    bool
 	Exists   bool
-	Meta     interface{}
+	Forced   bool
 }
 
 type EventCooldownConf struct {
@@ -32,7 +32,7 @@ type WatcherConf struct {
 	Cooldown EventCooldownConf `default:"EventCooldownConf{}"`
 }
 
-var EVENT_FORMAT_VERSION = "2019-01-10"
+var EVENT_FORMAT_VERSION = "2019-01-31"
 
 type WatcherEvent struct {
 	Version       string
@@ -43,7 +43,7 @@ type WatcherEvent struct {
 	Time          time.Time
 	FirstChange   time.Time
 	ChangeCounter uint32
-	Forced        bool
+	Meta     interface{}
 }
 
 type Watcher struct {
@@ -51,16 +51,15 @@ type Watcher struct {
 	watcher            *fsnotify.Watcher
 	done               chan bool
 	subs               []chan *WatcherEvent
-	in                 chan *WatcherEvent
-	out                chan *WatcherEvent
+	in                 chan *File
+	out                chan *File
 	pushed             chan string
 	coolingEvents      map[string]CooldownTimer
 	logger             *zap.Logger
 	onCoolDownDone     func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
-	cooldownEventMerge func(newData interface{}, oldData interface{}) (mergedData interface{})
 }
 
-var FILEINFO_FORMAT_VERSION = "2019-01-10"
+var FILEINFO_FORMAT_VERSION = "2019-01-31"
 
 type FileInfo struct {
 	Version string
@@ -95,30 +94,17 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 
 	EVENT_BUFFER_SIZE := 1024 * 1024
 	w.subs = make([]chan *WatcherEvent, 0)
-	w.in = make(chan *WatcherEvent, EVENT_BUFFER_SIZE)
-	w.out = make(chan *WatcherEvent, EVENT_BUFFER_SIZE)
+	w.in = make(chan *File, EVENT_BUFFER_SIZE)
+	w.out = make(chan *File, EVENT_BUFFER_SIZE)
 
 	w.done = make(chan bool)
 	w.pushed = make(chan string, 1000)
 	w.coolingEvents = make(map[string]CooldownTimer)
 	w.onCoolDownDone = func(data interface{}, timeCreated time.Time, timeUpdated time.Time) {
-		e := data.(*WatcherEvent)
+		e := data.(*File)
 		w.out <- e
 	}
-	w.cooldownEventMerge = func(newData interface{}, oldData interface{}) (mergedData interface{}) {
-		oldest := oldData.(*WatcherEvent)
-		newest := newData.(*WatcherEvent)
-
-		if oldest.Time.After(newest.Time) {
-			oldest, newest = newest, oldest
-		}
-
-		newest.ChangeCounter = oldest.ChangeCounter + 1
-		newest.FirstChange = oldest.FirstChange
-
-		return newest
-	}
-
+	
 	err = w.watcher.Add(w.conf.BaseDir)
 	if err != nil {
 		log.Fatal(err)
@@ -155,21 +141,13 @@ func (w *Watcher) Start() error {
 
 		w.logger.Info(fmt.Sprintf("Handling %s", filename))
 
-		file := File{
+		file := &File{
 			Name:     filename,
 			NormName: filepath.Clean(filename),
+			Forced: forced,
 		}
-		now := time.Now()
-		e := &WatcherEvent{
-			Version:     EVENT_FORMAT_VERSION,
-			UUID:        uuid.New().String(),
-			File:        &file,
-			watcher:     w,
-			Forced:      forced,
-			FirstChange: now,
-			Time:        now,
-		}
-		w.in <- e
+		
+		w.in <- file
 		w.logger.Info(fmt.Sprintf("Handled %s", filename))
 
 		return nil
@@ -225,9 +203,7 @@ func (w *Watcher) walkPush() {
 
 func (w *Watcher) cooldownNotifyLoop() {
 
-	handleIn := func(we *WatcherEvent) {
-		file := we.File
-		w := we.watcher
+	handleIn := func(file *File) {
 		w.watcher.Add(file.NormName)
 
 		ce := w.coolingEvents[file.NormName]
@@ -237,19 +213,16 @@ func (w *Watcher) cooldownNotifyLoop() {
 			ce, _ = NewCooldownTime(
 				fmt.Sprintf("cooldown:%s", file.Name),
 				cc.CounterMillis,
-				w.cooldownEventMerge,
 				w.onCoolDownDone)
 			w.coolingEvents[file.NormName] = ce
 		}
-		ce.NewData() <- we
+		ce.NewData() <- file
 	}
 
 	notify := func(we *WatcherEvent, s chan *WatcherEvent) {
 		s <- we
 	}
-
-	handleOut := func(we *WatcherEvent) {
-		file := we.File
+	handleOut := func(file *File) {
 		delete(w.coolingEvents, file.NormName)
 
 		stat, stat_err := os.Stat(file.NormName)
@@ -269,27 +242,36 @@ func (w *Watcher) cooldownNotifyLoop() {
 				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
 		}
-		we.Stat = s
-
+		now := time.Now()
+		e := &WatcherEvent{
+			Version:     EVENT_FORMAT_VERSION,
+			UUID:        uuid.New().String(),
+			File:        file,
+			watcher:     w,
+			FirstChange: now,
+			Time:        now,
+			Stat: s,
+		}
+		
 		for i, sub := range w.subs {
 			w.logger.Debug(fmt.Sprintf("Nofify Loop %v", i))
-			go notify(we, sub)
+			go notify(e, sub)
 		}
 	}
 
 	for {
 		w.logger.Debug("Cooldown Loop")
 		select {
-		case we := <-w.out:
-			w.logger.Info(fmt.Sprintf("OUT file: %s", we.File.NormName))
-			handleOut(we)
+		case f := <-w.out:
+			w.logger.Info(fmt.Sprintf("OUT file: %s", f.NormName))
+			handleOut(f)
 			continue
 		case <-w.done:
 			defer w.Done()
 			return
-		case we := <-w.in:
-			w.logger.Info(fmt.Sprintf("IN file: %s", we.File.NormName))
-			handleIn(we)
+		case f := <-w.in:
+			w.logger.Info(fmt.Sprintf("IN file: %s", f.NormName))
+			handleIn(f)
 			continue
 		}
 	}

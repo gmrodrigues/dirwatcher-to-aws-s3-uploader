@@ -18,6 +18,22 @@
   version = "v1.4.7"
 
 [[projects]]
+  digest = "1:ad53d1f710522a38d1f0e5e0a55a194b1c6b2cd8e84313568e43523271f0cf62"
+  name = "github.com/go-redis/redis"
+  packages = [
+    ".",
+    "internal",
+    "internal/consistenthash",
+    "internal/hashtag",
+    "internal/pool",
+    "internal/proto",
+    "internal/util",
+  ]
+  pruneopts = "UT"
+  revision = "22be8a3eaf992c828cecb69dc07348313bf08d2e"
+  version = "v6.15.1"
+
+[[projects]]
   branch = "master"
   digest = "1:d31e70dfb300a0f31b485000141e9fa8a2561be46a53fbe04616897272162262"
   name = "github.com/goinggo/tracelog"
@@ -105,21 +121,21 @@
   name = "golang.org/x/net"
   packages = ["context"]
   pruneopts = "UT"
-  revision = "be1c187aa6c66b9daa1d9461c228d17e9dd2cab7"
+  revision = "d26f9f9a57f3fab6a695bec0d84433c2c50f8bbf"
 
 [[projects]]
   branch = "master"
-  digest = "1:5ee4df7ab18e945607ac822de8d10b180baea263b5e8676a1041727543b9c1e4"
+  digest = "1:7941e2f16c0833b438cbef7fccfe4f8346f9f7876b42b29717a75d7e8c4800cb"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "48ac38b7c8cbedd50b1613c0fccacfc7d88dfcdf"
+  revision = "aca44879d5644da7c5b8ec6a1115e9b6ea6c40d9"
 
 [[projects]]
-  digest = "1:e1485ae61dac9a4e016867c376d7348e33e469dfae1d686a5da24cb526ad3c35"
+  digest = "1:3ea903182d4c09c8d71aa15df6e06a4306c108b11763632e3a64010ba8f6f5a0"
   name = "gopkg.in/DataDog/dd-trace-go.v1"
   packages = [
     "ddtrace",
@@ -129,16 +145,8 @@
     "ddtrace/tracer",
   ]
   pruneopts = "UT"
-  revision = "7fb2bce4b1ed6ab61f7a9e1be30dea56de19db7c"
-  version = "v1.8.0"
-
-[[projects]]
-  digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
-  name = "gopkg.in/yaml.v2"
-  packages = ["."]
-  pruneopts = "UT"
-  revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
-  version = "v2.2.2"
+  revision = "823d51722f66a748804943f6fa6be18776073b82"
+  version = "v1.9.0"
 
 [solve-meta]
   analyzer-name = "dep"
@@ -146,6 +154,7 @@
   input-imports = [
     "github.com/beanstalkd/go-beanstalk",
     "github.com/fsnotify/fsnotify",
+    "github.com/go-redis/redis",
     "github.com/goinggo/tracelog",
     "github.com/google/uuid",
     "github.com/jessevdk/go-flags",
@@ -154,7 +163,6 @@
     "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext",
     "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/opentracer",
     "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer",
-    "gopkg.in/yaml.v2",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

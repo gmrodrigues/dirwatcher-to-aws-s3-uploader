@@ -14,7 +14,6 @@ type cooldownTimer struct {
 	newData         chan interface{}
 	notify          chan bool
 	stop            chan bool
-	mergeData       func(newData interface{}, oldData interface{}) (mergedData interface{})
 	onDone          func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
 }
 
@@ -25,7 +24,6 @@ type CooldownTimer interface {
 
 func NewCooldownTime(
 	id string, countdownMillis uint64,
-	mergeData func(newData interface{}, oldData interface{}) (mergedData interface{}),
 	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
 
 	now := time.Now()
@@ -35,7 +33,6 @@ func NewCooldownTime(
 		timeCreated:     now,
 		timeUpdated:     now,
 		onDone:          onDone,
-		mergeData:       mergeData,
 		newData:         make(chan interface{}),
 		notify:          make(chan bool),
 		stop:            make(chan bool),
@@ -89,13 +86,7 @@ func (t *cooldownTimer) dataLoop() {
 		case newData := <-t.newData:
 			fmt.Printf("New data on countdown [%s]", t.id)
 			t.timeUpdated = time.Now()
-			if t.mergeData != nil {
-				if t.data != nil && newData != nil {
-					t.data = t.mergeData(newData, t.data)
-				} else {
-					t.data = newData
-				}
-			}
+			t.data = newData
 			t.notify <- true
 			continue
 		}

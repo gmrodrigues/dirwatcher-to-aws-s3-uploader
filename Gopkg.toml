@@ -34,6 +34,10 @@
   version = "1.4.7"
 
 [[constraint]]
+  name = "github.com/go-redis/redis"
+  version = "6.15.1"
+
+[[constraint]]
   branch = "master"
   name = "github.com/goinggo/tracelog"
 
@@ -55,11 +59,7 @@
 
 [[constraint]]
   name = "gopkg.in/DataDog/dd-trace-go.v1"
-  version = "1.8.0"
-
-[[constraint]]
-  name = "gopkg.in/yaml.v2"
-  version = "2.2.2"
+  version = "1.9.0"
 
 [prune]
   go-tests = true

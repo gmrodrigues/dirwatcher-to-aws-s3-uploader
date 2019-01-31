@@ -23,6 +23,7 @@ REGISTRY ?= thockin
 
 # Which architecture to build - see $(ALL_ARCH) for options.
 ARCH ?= amd64
+GOOS ?= $$(go env GOOS)
 
 # This version-strategy uses git tags to set the version string
 VERSION := $(shell git describe --tags --always --dirty)
@@ -81,6 +82,7 @@ build: bin/$(ARCH)/$(BIN)
 bin/$(ARCH)/$(BIN): build-dirs
 	@echo "building: $@"
 	@docker run                                                             \
+		-e GOOS=$(GOOS)                                                     \
 	    -ti                                                                 \
 	    --rm                                                                \
 	    -u $$(id -u):$$(id -g)                                              \
@@ -103,7 +105,8 @@ bin/$(ARCH)/$(BIN): build-dirs
 shell: build-dirs
 	@echo "launching a shell in the containerized build environment"
 	@docker run                                                             \
-	    -ti                                                                 \
+	    -e GOOS=$(GOOS)                                                     \
+		-ti                                                                 \
 	    --rm                                                                \
 	    -u $$(id -u):$$(id -g)                                              \
 	    -v "$$(pwd)/.go:/go"                                                \
@@ -148,7 +151,8 @@ version:
 
 test: build-dirs
 	@docker run                                                             \
-	    -ti                                                                 \
+	    -e GOOS=$(GOOS)                                                     \
+		-ti                                                                 \
 	    --rm                                                                \
 	    -u $$(id -u):$$(id -g)                                              \
 	    -v "$$(pwd)/.go:/go"                                                \
