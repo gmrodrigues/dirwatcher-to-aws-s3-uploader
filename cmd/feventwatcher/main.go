@@ -39,8 +39,8 @@ type Options struct {
 		Basepath              string `description:"Basepath on local filesystem to watch events from" short:"w" long:"basepath" env:"BASEPATH" required:"true"`
 		CooldownMillis        uint64 `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
 		ResourceNameFileDepth uint8  `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"3"`
-		Meta 				  string `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"` 
-	 } `group:"watch" namespace:"watcher" env-namespace:"WATCH"`
+		Meta                  string `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
+	} `group:"watch" namespace:"watcher" env-namespace:"WATCH"`
 	DataDogAgent struct {
 		AgentAddr   string   `description:"DataDog agent address" long:"agent-address" env:"AGENT_ADDR" default:"127.0.0.1:8126"`
 		ServiceName string   `description:"DataDog service name" long:"trace-service-name" default:"feventwatcher"`
@@ -56,7 +56,7 @@ type Options struct {
 		Addr     string `description:"Redis server host:port (Ex: localhost:6379)" long:"addr" env:"REDIS_ADDR"`
 		Password string `description:"Redis server password" long:"password" env:"REDIS_PASSWORD"`
 		QueueKey string `description:"Redis queue name" long:"queue-key" env:"REDIS_QUEUE" default:"fsevents:queue"`
-		Db 		 int `description:"Redis DB number" long:"db" env:"REDIS_DB" default:"0"`
+		Db       int    `description:"Redis DB number" long:"db" env:"REDIS_DB" default:"0"`
 	} `group:"redis" namespace:"redis" env-namespace:"REDIS"`
 	Health struct {
 		Port int `description:"Listen on port for healh check status report (GET /health)" long:"port" short:"p" env:"HEALTH_PORT"`
@@ -70,10 +70,11 @@ func main() {
 	_, err := flags.ParseArgs(&opts, os.Args)
 
 	if err != nil {
-		panic(err)
+		fmt.Println(err.Error())
+		os.Exit(-1)
 	}
 
-	Health(&opts)
+	go Health(&opts)
 
 	tstartops := []tracer.StartOption{
 		tracer.WithAgentAddr(opts.DataDogAgent.AgentAddr),
@@ -90,7 +91,6 @@ func main() {
 	defer tracer.Stop()
 	opentracing.SetGlobalTracer(t)
 
-	
 	//////////////////////////////////
 	// Beanstalkd
 
@@ -125,7 +125,7 @@ func main() {
 	}
 
 	redisHandle := func(pspan opentracing.Span, q redis.Queue, json []byte) {
-		span := t.StartSpan("beanstalk.producer", opentracing.ChildOf(pspan.Context()))
+		span := t.StartSpan("redis.producer", opentracing.ChildOf(pspan.Context()))
 		defer span.Finish()
 
 		span.SetTag(ext.ResourceName, q.Key())
@@ -165,19 +165,27 @@ func main() {
 		defer span.Finish()
 		rname := ResourceName(e.File.Name, opts.Watch.Basepath, int(opts.Watch.ResourceNameFileDepth))
 		span.SetTag(ext.ResourceName, rname)
-		e.Meta = opts.Watch.Meta
-		json, _ := json.MarshalIndent(e, "", "  ")
-		fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(json))
+		span.SetTag("event.uuid", e.UUID)
+		span.SetTag("event.versoin", e.Version)
+		span.SetTag("event.timestamp", e.Times)
+		span.SetTag("file.name", e.File.Name)
+		span.SetTag("file.norm", e.File.NormName)
+		span.SetTag("file.size", e.Stat.Size)
+		span.SetTag("file.exist", e.File.Exists)
+		span.SetTag("file.is_dir", e.File.IsDir)
 
-		span.LogKV("event", rname)
-		span.LogKV("payload", string(json))
+		e.Meta = opts.Watch.Meta
+		payload, _ := json.MarshalIndent(e, "", "  ")
+		span.SetTag("payload", string(payload))
+
+		fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(payload))
 
 		for _, rqueue := range rqueues {
-			redisHandle(span, rqueue, json)
+			redisHandle(span, rqueue, payload)
 		}
 
 		for _, bqueue := range bqueues {
-			bstalckHandle(span, bqueue, json)
+			bstalckHandle(span, bqueue, payload)
 		}
 	})
 
@@ -223,9 +231,9 @@ func InitRedis(opts Options) ([]redis.Queue, error) {
 	opt := opts.Redis
 	if len(opt.Addr) > 0 {
 		conf := redis.ClientConf{
-			Addr: opt.Addr,
+			Addr:     opt.Addr,
 			Password: opt.Password,
-			DB: opt.Db,
+			DB:       opt.Db,
 		}
 		c, err := redis.NewClient(conf)
 		if err != nil {
