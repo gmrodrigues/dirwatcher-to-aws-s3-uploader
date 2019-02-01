@@ -35,28 +35,35 @@ type WatcherConf struct {
 var EVENT_FORMAT_VERSION = "2019-01-31"
 
 type WatcherEvent struct {
-	Version       string
-	UUID          string
-	File          *File
-	Stat          FileInfo
-	watcher       *Watcher
-	Time          time.Time
-	FirstChange   time.Time
-	ChangeCounter uint32
-	Meta     interface{}
+	Version     string
+	UUID        string
+	File        *File
+	Stat        FileInfo
+	watcher     *Watcher
+	Time        time.Time
+	FirstChange time.Time
+	Events      uint32
+	Meta        interface{}
+}
+
+type CoolDownDone struct {
+	file        *File
+	timeCreated time.Time
+	timeUpdated time.Time
+	counter     uint32
 }
 
 type Watcher struct {
-	conf               WatcherConf
-	watcher            *fsnotify.Watcher
-	done               chan bool
-	subs               []chan *WatcherEvent
-	in                 chan *File
-	out                chan *File
-	pushed             chan string
-	coolingEvents      map[string]CooldownTimer
-	logger             *zap.Logger
-	onCoolDownDone     func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
+	conf           WatcherConf
+	watcher        *fsnotify.Watcher
+	done           chan bool
+	subs           []chan *WatcherEvent
+	in             chan *File
+	out            chan *CoolDownDone
+	pushed         chan string
+	coolingEvents  map[string]CooldownTimer
+	logger         *zap.Logger
+	onCoolDownDone func(data interface{}, counter uint32, timeCreated time.Time, timeUpdated time.Time)
 }
 
 var FILEINFO_FORMAT_VERSION = "2019-01-31"
@@ -95,16 +102,21 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 	EVENT_BUFFER_SIZE := 1024 * 1024
 	w.subs = make([]chan *WatcherEvent, 0)
 	w.in = make(chan *File, EVENT_BUFFER_SIZE)
-	w.out = make(chan *File, EVENT_BUFFER_SIZE)
+	w.out = make(chan *CoolDownDone, EVENT_BUFFER_SIZE)
 
 	w.done = make(chan bool)
 	w.pushed = make(chan string, 1000)
 	w.coolingEvents = make(map[string]CooldownTimer)
-	w.onCoolDownDone = func(data interface{}, timeCreated time.Time, timeUpdated time.Time) {
-		e := data.(*File)
-		w.out <- e
+	w.onCoolDownDone = func(data interface{}, counter uint32, timeCreated time.Time, timeUpdated time.Time) {
+		f := data.(*File)
+		w.out <- &CoolDownDone{
+			file:        f,
+			timeCreated: timeCreated,
+			timeUpdated: timeUpdated,
+			counter:     counter,
+		}
 	}
-	
+
 	err = w.watcher.Add(w.conf.BaseDir)
 	if err != nil {
 		log.Fatal(err)
@@ -112,6 +124,10 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 	}
 
 	return w, nil
+}
+
+func (e *WatcherEvent) Watcher() *Watcher {
+	return e.watcher
 }
 
 func (w *Watcher) Done() error {
@@ -143,10 +159,10 @@ func (w *Watcher) Start() error {
 
 		file := &File{
 			Name:     filename,
-			NormName: filepath.Clean(filename),
-			Forced: forced,
+			NormName: filepath.ToSlash(filepath.Clean(filename)),
+			Forced:   forced,
 		}
-		
+
 		w.in <- file
 		w.logger.Info(fmt.Sprintf("Handled %s", filename))
 
@@ -162,7 +178,6 @@ func (w *Watcher) Start() error {
 		case event, ok := <-w.watcher.Events:
 			forced := false
 			if ok {
-				fmt.Printf("Ahew: [%s] %#v", event.Name, event)
 				go handle(event.Name, forced)
 				continue
 			}
@@ -175,7 +190,6 @@ func (w *Watcher) Start() error {
 			continue
 		case filename := <-w.pushed:
 			forced := true
-			fmt.Printf("Woooo: [%s]", filename)
 			go handle(filename, forced)
 			continue
 		case <-time.After(time.Minute):
@@ -209,7 +223,6 @@ func (w *Watcher) cooldownNotifyLoop() {
 		ce := w.coolingEvents[file.NormName]
 		if ce == nil {
 			cc := w.conf.Cooldown
-			fmt.Printf("\n\nCOUNTER %v\n", cc.CounterMillis)
 			ce, _ = NewCooldownTime(
 				fmt.Sprintf("cooldown:%s", file.Name),
 				cc.CounterMillis,
@@ -222,7 +235,8 @@ func (w *Watcher) cooldownNotifyLoop() {
 	notify := func(we *WatcherEvent, s chan *WatcherEvent) {
 		s <- we
 	}
-	handleOut := func(file *File) {
+	handleOut := func(cdd *CoolDownDone) {
+		file := cdd.file
 		delete(w.coolingEvents, file.NormName)
 
 		stat, stat_err := os.Stat(file.NormName)
@@ -231,7 +245,7 @@ func (w *Watcher) cooldownNotifyLoop() {
 			Version: FILEINFO_FORMAT_VERSION,
 			Name:    path.Base(file.NormName),
 		}
-		if file.Exists {
+		if file.Exists && stat != nil {
 			file.IsDir = stat.IsDir()
 			s = FileInfo{
 				Version: FILEINFO_FORMAT_VERSION,
@@ -242,17 +256,17 @@ func (w *Watcher) cooldownNotifyLoop() {
 				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
 		}
-		now := time.Now()
 		e := &WatcherEvent{
 			Version:     EVENT_FORMAT_VERSION,
 			UUID:        uuid.New().String(),
 			File:        file,
 			watcher:     w,
-			FirstChange: now,
-			Time:        now,
-			Stat: s,
+			FirstChange: cdd.timeCreated,
+			Time:        cdd.timeUpdated,
+			Events:      cdd.counter,
+			Stat:        s,
 		}
-		
+
 		for i, sub := range w.subs {
 			w.logger.Debug(fmt.Sprintf("Nofify Loop %v", i))
 			go notify(e, sub)
@@ -262,9 +276,9 @@ func (w *Watcher) cooldownNotifyLoop() {
 	for {
 		w.logger.Debug("Cooldown Loop")
 		select {
-		case f := <-w.out:
-			w.logger.Info(fmt.Sprintf("OUT file: %s", f.NormName))
-			handleOut(f)
+		case cdd := <-w.out:
+			w.logger.Info(fmt.Sprintf("OUT file: %s", cdd.file.NormName))
+			handleOut(cdd)
 			continue
 		case <-w.done:
 			defer w.Done()

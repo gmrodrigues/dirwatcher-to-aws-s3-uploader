@@ -10,11 +10,12 @@ type cooldownTimer struct {
 	timeCreated     time.Time
 	timeUpdated     time.Time
 	countdownMillis uint64
+	counter         uint32
 	data            interface{}
 	newData         chan interface{}
 	notify          chan bool
 	stop            chan bool
-	onDone          func(data interface{}, timeCreated time.Time, timeUpdated time.Time)
+	onDone          func(data interface{}, counter uint32, timeCreated time.Time, timeUpdated time.Time)
 }
 
 type CooldownTimer interface {
@@ -24,7 +25,7 @@ type CooldownTimer interface {
 
 func NewCooldownTime(
 	id string, countdownMillis uint64,
-	onDone func(data interface{}, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
+	onDone func(data interface{}, counter uint32, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
 
 	now := time.Now()
 	t := &cooldownTimer{
@@ -59,9 +60,7 @@ func (t *cooldownTimer) coolingLoop() {
 					t.stop <- true
 					if t.data != nil {
 						fmt.Printf("Cooled countdown [%s]", t.id)
-						d, c, u := t.data, t.timeCreated, t.timeUpdated
-						t.data = nil
-						t.onDone(d, c, u)
+						t.onDone(t.data, t.counter, t.timeCreated, t.timeUpdated)
 					}
 					defer t.Stop()
 					return
@@ -86,6 +85,7 @@ func (t *cooldownTimer) dataLoop() {
 		case newData := <-t.newData:
 			fmt.Printf("New data on countdown [%s]", t.id)
 			t.timeUpdated = time.Now()
+			t.counter = t.counter + 1
 			t.data = newData
 			t.notify <- true
 			continue

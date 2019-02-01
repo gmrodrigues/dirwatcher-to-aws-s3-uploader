@@ -22,6 +22,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/gmrodrigues/feventwatcher/pkg/feventwatcher"
 	"github.com/gmrodrigues/feventwatcher/pkg/modules/beanstalkd"
@@ -36,10 +37,10 @@ import (
 
 type Options struct {
 	Watch struct {
-		Basepath              string `description:"Basepath on local filesystem to watch events from" short:"w" long:"basepath" env:"BASEPATH" required:"true"`
-		CooldownMillis        uint64 `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
-		ResourceNameFileDepth uint8  `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"3"`
-		Meta                  string `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
+		Basepath              []string `description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH" required:"true"`
+		CooldownMillis        uint64   `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
+		ResourceNameFileDepth uint8    `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
+		Meta                  string   `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
 	} `group:"watch" namespace:"watcher" env-namespace:"WATCH"`
 	DataDogAgent struct {
 		AgentAddr   string   `description:"DataDog agent address" long:"agent-address" env:"AGENT_ADDR" default:"127.0.0.1:8126"`
@@ -144,35 +145,20 @@ func main() {
 	/////////////////////////////////
 	// Start Watcher
 
-	tracelog.Start(tracelog.LevelTrace)
-	//fmt.Printf("File %s\n", dirname)
-	conf := feventwatcher.WatcherConf{
-		BaseDir: opts.Watch.Basepath,
-		Cooldown: feventwatcher.EventCooldownConf{
-			CounterMillis: opts.Watch.CooldownMillis,
-		},
-	}
-
-	w, err := feventwatcher.NewWatchable(conf)
-	if err != nil {
-		fmt.Printf("Failed to start watcher: %s", err.Error())
-		return
-	}
-
-	fmt.Println("Starting watcher with confs: %#v", conf)
-	w.SubscribeFunc(func(e *feventwatcher.WatcherEvent) {
+	handler := func(e *feventwatcher.WatcherEvent) {
 		span := t.StartSpan("watch.event.notify")
 		defer span.Finish()
-		rname := ResourceName(e.File.Name, opts.Watch.Basepath, int(opts.Watch.ResourceNameFileDepth))
+		rname := ResourceName(e.File.NormName, e.Watcher().Conf().BaseDir, int(opts.Watch.ResourceNameFileDepth))
 		span.SetTag(ext.ResourceName, rname)
 		span.SetTag("event.uuid", e.UUID)
 		span.SetTag("event.versoin", e.Version)
-		span.SetTag("event.timestamp", e.Times)
+		span.SetTag("event.timestamp", e.Time)
 		span.SetTag("file.name", e.File.Name)
 		span.SetTag("file.norm", e.File.NormName)
 		span.SetTag("file.size", e.Stat.Size)
-		span.SetTag("file.exist", e.File.Exists)
+		span.SetTag("file.exists", e.File.Exists)
 		span.SetTag("file.is_dir", e.File.IsDir)
+		span.SetTag("watch.base", e.Watcher().Conf().BaseDir)
 
 		e.Meta = opts.Watch.Meta
 		payload, _ := json.MarshalIndent(e, "", "  ")
@@ -187,11 +173,36 @@ func main() {
 		for _, bqueue := range bqueues {
 			bstalckHandle(span, bqueue, payload)
 		}
-	})
+	}
 
-	fmt.Println("Starting ...")
-	w.Start()
-	fmt.Println("Done!")
+	fmt.Print("Starting ...")
+	tracelog.Start(tracelog.LevelTrace)
+	var wg sync.WaitGroup
+	for _, basepath := range opts.Watch.Basepath {
+		//fmt.Printf("File %s\n", dirname)
+		conf := feventwatcher.WatcherConf{
+			BaseDir: basepath,
+			Cooldown: feventwatcher.EventCooldownConf{
+				CounterMillis: opts.Watch.CooldownMillis,
+			},
+		}
+
+		w, err := feventwatcher.NewWatchable(conf)
+		if err != nil {
+			fmt.Printf("Failed to start watcher: %s", err.Error())
+			return
+		}
+
+		fmt.Println("Starting watcher with confs: %#v", conf)
+		w.SubscribeFunc(handler)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w.Start()
+		}()
+	}
+
+	wg.Wait()
 	fmt.Println("Done!")
 }
 
