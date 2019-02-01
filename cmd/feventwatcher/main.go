@@ -145,20 +145,27 @@ func main() {
 	/////////////////////////////////
 	// Start Watcher
 
+	runtime := NewHealthStatus(&opts).Runtime
 	handler := func(e *feventwatcher.WatcherEvent) {
 		span := t.StartSpan("watch.event.notify")
 		defer span.Finish()
 		rname := ResourceName(e.File.NormName, e.Watcher().Conf().BaseDir, int(opts.Watch.ResourceNameFileDepth))
 		span.SetTag(ext.ResourceName, rname)
 		span.SetTag("event.uuid", e.UUID)
-		span.SetTag("event.versoin", e.Version)
+		span.SetTag("event.version", e.Version)
 		span.SetTag("event.timestamp", e.Time)
 		span.SetTag("file.name", e.File.Name)
 		span.SetTag("file.norm", e.File.NormName)
 		span.SetTag("file.size", e.Stat.Size)
 		span.SetTag("file.exists", e.File.Exists)
 		span.SetTag("file.is_dir", e.File.IsDir)
-		span.SetTag("watch.base", e.Watcher().Conf().BaseDir)
+		span.SetTag("file.forced", e.File.Forced)
+		span.SetTag("file.watch.base", e.Watcher().Conf().BaseDir)
+		span.SetTag("runtime.pid", runtime.Pid)
+		span.SetTag("runtime.executable", runtime.Executable)
+		span.SetTag("runtime.Wd", runtime.Wd)
+		span.SetTag("runtime.hostname", runtime.Hostname)
+		span.SetTag("runtime.uptime", uptime())
 
 		e.Meta = opts.Watch.Meta
 		payload, _ := json.MarshalIndent(e, "", "  ")
