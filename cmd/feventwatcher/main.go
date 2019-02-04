@@ -163,11 +163,7 @@ func main() {
 		span.SetTag(ext.ResourceName, s.TopicArn())
 		span.SetTag("topic.arn", s.TopicArn())
 
-		err := s.PublishSync(json)
-		if err != nil {
-			span.LogKV("error", err)
-			return
-		}
+		s.Publish(json)
 
 		span.LogKV("payload", json)
 	}
@@ -331,6 +327,7 @@ func InitSns(opts Options) ([]*aws.SnsPublishPool, error) {
 		if err != nil {
 			return nil, err
 		}
+		go pool.Start()
 		pools = append(pools, pool)
 	}
 	return pools, nil
