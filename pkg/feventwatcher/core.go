@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -70,7 +69,8 @@ var FILEINFO_FORMAT_VERSION = "2019-01-31"
 
 type FileInfo struct {
 	Version string
-	Name    string      // base name of the file
+	Name    string // base name of the file
+	Base    string
 	Size    int64       // length in bytes for regular files; system-dependent for others
 	Mode    os.FileMode // file mode bits
 	ModTime time.Time   // modification time
@@ -90,6 +90,7 @@ func NewWatcherEventChan() chan *WatcherEvent {
 }
 
 func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
+	conf.BaseDir = filepath.ToSlash(filepath.Clean(conf.BaseDir))
 	w := &Watcher{conf: conf}
 	w.watcher, err = fsnotify.NewWatcher()
 	w.logger, _ = zap.NewDevelopment()
@@ -241,15 +242,18 @@ func (w *Watcher) cooldownNotifyLoop() {
 
 		stat, stat_err := os.Stat(file.NormName)
 		file.Exists = !os.IsNotExist(stat_err)
+		rel, _ := filepath.Rel(w.conf.BaseDir, file.NormName)
 		s := FileInfo{
 			Version: FILEINFO_FORMAT_VERSION,
-			Name:    path.Base(file.NormName),
+			Name:    rel,
+			Base:    w.conf.BaseDir,
 		}
 		if file.Exists && stat != nil {
 			file.IsDir = stat.IsDir()
 			s = FileInfo{
 				Version: FILEINFO_FORMAT_VERSION,
-				Name:    stat.Name(),    // base name of the file
+				Name:    rel, // relative name of the file
+				Base:    w.conf.BaseDir,
 				Size:    stat.Size(),    // length in bytes for regular files; system-dependent for others
 				Mode:    stat.Mode(),    // file mode bits
 				ModTime: stat.ModTime(), // modification time

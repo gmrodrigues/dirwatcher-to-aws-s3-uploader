@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/gmrodrigues/feventwatcher/pkg/feventwatcher"
+	"github.com/gmrodrigues/feventwatcher/pkg/modules/aws"
 	"github.com/gmrodrigues/feventwatcher/pkg/modules/beanstalkd"
 	"github.com/gmrodrigues/feventwatcher/pkg/modules/redis"
 	"github.com/goinggo/tracelog"
@@ -59,11 +60,22 @@ type Options struct {
 		QueueKey string `description:"Redis queue name" long:"queue-key" env:"REDIS_QUEUE" default:"fsevents:queue"`
 		Db       int    `description:"Redis DB number" long:"db" env:"REDIS_DB" default:"0"`
 	} `group:"redis" namespace:"redis" env-namespace:"REDIS"`
+	Aws struct {
+		AccessKeyId     string `description:"Specifies an AWS access key associated with an IAM user or role." long:"access-key-id" env:"AWS_ACCESS_KEY_ID"`
+		SecredAccessKey string `description:"Specifies the secret key associated with the access key. This is essentially the 'password' for the access key." long:"secred-access-key" env:"AWS_SECRET_ACCESS_KEY"`
+		Sns             struct {
+			TopicArn       []string `description:"AWS SNS topic arn to send events to. Can be set multiple times." long:"topic-arn" env:"AWS_SNS_TOPIC_ARN"`
+			PoolSize       uint     `description:"AWS SNS concurrent connections for pushing" long:"pool-size" env:"AWS_SNS_POOL_SIZE" default:"25"`
+			TimeoutSeconds uint     `description:"AWS SNS publish timout" long:"timout-seconds" env:"AWS_SNS_TIMEOUT_SECONDS" default:"5"`
+		} `group:"sns" namespace:"sns"`
+	} `group:"aws" namespace:"aws" env-namespace:"AWS"`
 	Health struct {
 		Port int `description:"Listen on port for healh check status report (GET /health)" long:"port" short:"p" env:"HEALTH_PORT"`
 	} `group:"health" namespace:"health" env-namespace:"HEALTH"`
 	Debug []bool `description:"Debug mode, use multiple times to raise verbosity" short:"d" long:"debug"`
 }
+
+type handleFunc func(pspan opentracing.Span, json []byte)
 
 func main() {
 
@@ -74,6 +86,8 @@ func main() {
 		fmt.Println(err.Error())
 		os.Exit(-1)
 	}
+
+	debug := len(opts.Debug) > 0
 
 	go Health(&opts)
 
@@ -92,18 +106,18 @@ func main() {
 	defer tracer.Stop()
 	opentracing.SetGlobalTracer(t)
 
-	//////////////////////////////////
-	// Beanstalkd
-
 	bqueues, err := InitBeanstalkd(opts)
 	if err != nil {
-		//fmt.Fprintf(os.Stderr, "Beanstalkd Client error: %s", err.Error())
 		panic(err)
 	}
 
 	rqueues, err := InitRedis(opts)
 	if err != nil {
-		//fmt.Fprintf(os.Stderr, "Beanstalkd Client error: %s", err.Error())
+		panic(err)
+	}
+
+	squeues, err := InitSns(opts)
+	if err != nil {
 		panic(err)
 	}
 
@@ -142,6 +156,45 @@ func main() {
 		span.LogKV("payload", json)
 	}
 
+	snsHandle := func(pspan opentracing.Span, s *aws.SnsPublishPool, json []byte) {
+		span := t.StartSpan("aws_sns.producer", opentracing.ChildOf(pspan.Context()))
+		defer span.Finish()
+
+		span.SetTag(ext.ResourceName, s.TopicArn())
+		span.SetTag("topic.arn", s.TopicArn())
+
+		err := s.PublishSync(json)
+		if err != nil {
+			span.LogKV("error", err)
+			return
+		}
+
+		span.LogKV("payload", json)
+	}
+
+	handleFuncs := make([]handleFunc, 0)
+	if len(bqueues) > 0 {
+		handleFuncs = append(handleFuncs, func(pspan opentracing.Span, json []byte) {
+			for _, bqueue := range bqueues {
+				bstalckHandle(pspan, bqueue, json)
+			}
+		})
+	}
+	if len(rqueues) > 0 {
+		handleFuncs = append(handleFuncs, func(pspan opentracing.Span, json []byte) {
+			for _, rqueue := range rqueues {
+				redisHandle(pspan, rqueue, json)
+			}
+		})
+	}
+	if len(squeues) > 0 {
+		handleFuncs = append(handleFuncs, func(pspan opentracing.Span, json []byte) {
+			for _, squeue := range squeues {
+				snsHandle(pspan, squeue, json)
+			}
+		})
+	}
+
 	/////////////////////////////////
 	// Start Watcher
 
@@ -149,7 +202,7 @@ func main() {
 	handler := func(e *feventwatcher.WatcherEvent) {
 		span := t.StartSpan("watch.event.notify")
 		defer span.Finish()
-		rname := ResourceName(e.File.NormName, e.Watcher().Conf().BaseDir, int(opts.Watch.ResourceNameFileDepth))
+		rname := ResourceName(e.Stat.Name, e.Stat.Base, int(opts.Watch.ResourceNameFileDepth))
 		span.SetTag(ext.ResourceName, rname)
 		span.SetTag("event.uuid", e.UUID)
 		span.SetTag("event.version", e.Version)
@@ -160,6 +213,9 @@ func main() {
 		span.SetTag("file.exists", e.File.Exists)
 		span.SetTag("file.is_dir", e.File.IsDir)
 		span.SetTag("file.forced", e.File.Forced)
+		span.SetTag("stat.Name", e.Stat.Name)
+		span.SetTag("stat.Base", e.Stat.Base)
+		span.SetTag("stat.ModTime", e.Stat.ModTime)
 		span.SetTag("file.watch.base", e.Watcher().Conf().BaseDir)
 		span.SetTag("runtime.pid", runtime.Pid)
 		span.SetTag("runtime.executable", runtime.Executable)
@@ -171,14 +227,12 @@ func main() {
 		payload, _ := json.MarshalIndent(e, "", "  ")
 		span.SetTag("payload", string(payload))
 
-		fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(payload))
-
-		for _, rqueue := range rqueues {
-			redisHandle(span, rqueue, payload)
+		if debug {
+			fmt.Printf("\nGot Jobe %s\n%s\n\n", rname, string(payload))
 		}
 
-		for _, bqueue := range bqueues {
-			bstalckHandle(span, bqueue, payload)
+		for _, hf := range handleFuncs {
+			hf(span, payload)
 		}
 	}
 
@@ -214,9 +268,9 @@ func main() {
 }
 
 func ResourceName(fullpath string, basepath string, depth int) string {
-	p := strings.Replace(path.Clean(fullpath), path.Clean(basepath), path.Base(basepath), 1)
-	pathCrumbs := strings.Split(p, string(os.PathSeparator))
-	maxRange := 3
+	p := strings.Replace(path.Clean(fullpath), path.Clean(basepath), "", 1)
+	pathCrumbs := strings.Split(p, "/")
+	maxRange := depth
 	if len(pathCrumbs) < maxRange {
 		maxRange = len(pathCrumbs)
 	}
@@ -265,4 +319,19 @@ func InitRedis(opts Options) ([]redis.Queue, error) {
 	}
 
 	return []redis.Queue{}, nil
+}
+
+func InitSns(opts Options) ([]*aws.SnsPublishPool, error) {
+	pools := make([]*aws.SnsPublishPool, 0)
+	Aws := opts.Aws
+	for _, arn := range Aws.Sns.TopicArn {
+		pool, err := aws.BuildSnsPool(
+			Aws.AccessKeyId, Aws.SecredAccessKey,
+			arn, Aws.Sns.PoolSize, Aws.Sns.TimeoutSeconds)
+		if err != nil {
+			return nil, err
+		}
+		pools = append(pools, pool)
+	}
+	return pools, nil
 }

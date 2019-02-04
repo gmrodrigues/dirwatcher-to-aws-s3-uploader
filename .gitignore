@@ -4,3 +4,4 @@
 /.container-*
 /.dockerfile-*
 /pkg/dw2s3up/test/
+*.zip

@@ -86,3 +86,9 @@ Run `make push` to push the container image to `REGISTRY`.  Run `make all-push`
 to push the container images for all architectures.
 
 Run `make clean` to clean up.
+
+## Create Windows Service
+
+We recoment using https://nssm.cc/
+ - [Download](https://nssm.cc/download)
+ - [Usage](https://nssm.cc/usage)
