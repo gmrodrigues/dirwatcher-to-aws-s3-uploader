@@ -24,16 +24,18 @@ curl -XGET http://localhost:9123/health -I # check if its running
 ## Usage
 
 ```Shell
-feventwatcher [OPTIONS]
+Usage:
+  feventwatcher [OPTIONS]
 
 Application Options:
   -d, --debug                        Debug mode, use multiple times to raise verbosity
 
 watch:
-  -w, --watcher.basepath=            Basepath on local filesystem to watch events from [$BASEPATH]
+  -w, --watcher.basepath=            Basepath on local filesystem to watch events from. Can be set multiple times [$BASEPATH]
   -t, --watcher.cooldown-millis=     Cooldown milliseconds before notify watcher events (default: 1000) [$COOLDOWN_MILLIS]
-  -r, --watcher.resource-name-depth= Use n levels of depth on file path as resource name (default: 3) [$RESOURCE_DEPTH]
-  -x, --watcher.meta=                Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host, enviroment, etc) [$WATCH_META]
+  -r, --watcher.resource-name-depth= Use n levels of depth on file path as resource name (default: 4) [$RESOURCE_DEPTH]
+  -x, --watcher.meta=                Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host, enviroment,
+                                     etc) [$WATCH_META]
 
 ddagent:
       --dd.agent-address=            DataDog agent address (default: 127.0.0.1:8126) [$AGENT_ADDR]
@@ -52,11 +54,22 @@ redis:
       --redis.queue-key=             Redis queue name (default: fsevents:queue) [$REDIS_QUEUE]
       --redis.db=                    Redis DB number (default: 0) [$REDIS_DB]
 
+aws:
+      --aws.access-key-id=           Specifies an AWS access key associated with an IAM user or role. [$AWS_ACCESS_KEY_ID]
+      --aws.secred-access-key=       Specifies the secret key associated with the access key. This is essentially the 'password' for the access key.
+                                     [$AWS_SECRET_ACCESS_KEY]
+
+sns:
+      --aws.sns.topic-arn=           AWS SNS topic arn to send events to. Can be set multiple times. [$AWS_SNS_TOPIC_ARN]
+      --aws.sns.pool-size=           AWS SNS concurrent connections for pushing (default: 25) [$AWS_SNS_POOL_SIZE]
+      --aws.sns.timout-seconds=      AWS SNS publish timout (default: 5) [$AWS_SNS_TIMEOUT_SECONDS]
+
 health:
   -p, --health.port=                 Listen on port for healh check status report (GET /health) [$HEALTH_PORT]
 
 Help Options:
   -h, --help                         Show this help message
+
 
 
 ```
