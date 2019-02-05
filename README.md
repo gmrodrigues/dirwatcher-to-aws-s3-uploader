@@ -9,7 +9,7 @@ Check binary multiplataform releases:
 
 ## Health check
 
-You can set an tcp port and use it for health checking:
+You can set a tcp port and use it for health checking:
 
 ```Shell
 
