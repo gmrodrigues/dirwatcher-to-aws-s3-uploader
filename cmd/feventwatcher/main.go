@@ -42,6 +42,10 @@ type Options struct {
 		CooldownMillis        uint64   `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
 		ResourceNameFileDepth uint8    `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
 		Meta                  string   `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
+		Filter                struct {
+			RegexBlackList []string `description:"Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name." long:"blacklist" env:"WATCH_FILTER_BLACKLIST"`
+			RegexWhiteList []string `description:"Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name." long:"whitelist" env:"WATCH_FILTER_WHITELIST"`
+		} `group:"filter" namespace:"filter"`
 	} `group:"watch" namespace:"watcher" env-namespace:"WATCH"`
 	DataDogAgent struct {
 		AgentAddr   string   `description:"DataDog agent address" long:"agent-address" env:"AGENT_ADDR" default:"127.0.0.1:8126"`
@@ -83,7 +87,9 @@ func main() {
 	_, err := flags.ParseArgs(&opts, os.Args)
 
 	if err != nil {
-		fmt.Println(err.Error())
+		if _, ok := err.(*flags.Error); !ok {
+			fmt.Println(err.Error())
+		}
 		os.Exit(-1)
 	}
 
@@ -242,6 +248,8 @@ func main() {
 			Cooldown: feventwatcher.EventCooldownConf{
 				CounterMillis: opts.Watch.CooldownMillis,
 			},
+			RegexWhiteList: opts.Watch.Filter.RegexWhiteList,
+			RegexBlackList: opts.Watch.Filter.RegexBlackList,
 		}
 
 		w, err := feventwatcher.NewWatchable(conf)

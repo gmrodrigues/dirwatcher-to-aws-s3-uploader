@@ -24,6 +24,7 @@ curl -XGET http://localhost:9123/health -I # check if its running
 ## Usage
 
 ```Shell
+$ bin/amd64/feventwatcher -h
 Usage:
   feventwatcher [OPTIONS]
 
@@ -36,6 +37,12 @@ watch:
   -r, --watcher.resource-name-depth= Use n levels of depth on file path as resource name (default: 4) [$RESOURCE_DEPTH]
   -x, --watcher.meta=                Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host, enviroment,
                                      etc) [$WATCH_META]
+
+filter:
+      --watcher.filter.blacklist=    Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name.
+                                     [$WATCH_FILTER_BLACKLIST]
+      --watcher.filter.whitelist=    Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name.
+                                     [$WATCH_FILTER_BLACKLIST]
 
 ddagent:
       --dd.agent-address=            DataDog agent address (default: 127.0.0.1:8126) [$AGENT_ADDR]
@@ -69,9 +76,6 @@ health:
 
 Help Options:
   -h, --help                         Show this help message
-
-
-
 ```
 
 ## Building

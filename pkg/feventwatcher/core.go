@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -26,9 +27,11 @@ type EventCooldownConf struct {
 }
 
 type WatcherConf struct {
-	BaseDir  string
-	DotFiles bool
-	Cooldown EventCooldownConf `default:"EventCooldownConf{}"`
+	BaseDir        string
+	DotFiles       bool
+	RegexWhiteList []string
+	RegexBlackList []string
+	Cooldown       EventCooldownConf `default:"EventCooldownConf{}"`
 }
 
 var EVENT_FORMAT_VERSION = "2019-01-31"
@@ -53,8 +56,12 @@ type CoolDownDone struct {
 }
 
 type Watcher struct {
-	conf           WatcherConf
-	watcher        *fsnotify.Watcher
+	conf    WatcherConf
+	watcher *fsnotify.Watcher
+	filter  struct {
+		regxpWL []*regexp.Regexp
+		regxpBL []*regexp.Regexp
+	}
 	done           chan bool
 	subs           []chan *WatcherEvent
 	in             chan *File
@@ -90,8 +97,27 @@ func NewWatcherEventChan() chan *WatcherEvent {
 }
 
 func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
-	conf.BaseDir = filepath.ToSlash(filepath.Clean(conf.BaseDir))
 	w := &Watcher{conf: conf}
+
+	//init black and white lists
+	for _, s := range w.conf.RegexWhiteList {
+		r, err := regexp.Compile(s)
+		if err != nil {
+			return nil, fmt.Errorf("Regex [%s] for white list [%s]: %s", s, conf.BaseDir, err.Error())
+		}
+		w.filter.regxpWL = append(w.filter.regxpWL, r)
+	}
+
+	for _, s := range w.conf.RegexBlackList {
+		r, err := regexp.Compile(s)
+		if err != nil {
+			return nil, fmt.Errorf("Regex [%s] for black list [%s]: %s", s, conf.BaseDir, err.Error())
+		}
+		w.filter.regxpBL = append(w.filter.regxpBL, r)
+	}
+
+	// init watcher
+	conf.BaseDir = filepath.ToSlash(filepath.Clean(conf.BaseDir))
 	w.watcher, err = fsnotify.NewWatcher()
 	w.logger, _ = zap.NewDevelopment()
 	defer w.logger.Sync()
@@ -144,23 +170,52 @@ func (w *Watcher) Start() error {
 	defer w.logger.Sync()
 	defer w.watcher.Close()
 
+	anyWhiteListFilter := len(w.filter.regxpWL) > 0
+	anyFilter := anyWhiteListFilter || len(w.filter.regxpBL) > 0
+
+	acceptedByFilters := func(normName string) bool {
+		accepted := true
+		if anyFilter {
+			for _, m := range w.filter.regxpBL {
+				if m.MatchString(normName) {
+					w.logger.Info(fmt.Sprintf("Blacklisted %s", normName))
+					return false
+				}
+			}
+			for _, m := range w.filter.regxpWL {
+				accepted = false
+				if m.MatchString(normName) {
+					w.logger.Info(fmt.Sprintf("Whitelisted %s", normName))
+					return true
+				}
+			}
+			return accepted
+		}
+		return accepted
+	}
+
 	handle := func(filename string, forced bool) error {
-		fmt.Printf("\n\nHandle: %s\n\n", filename)
+		normName := filepath.ToSlash(filepath.Clean(filename))
 
 		if len(filename) == 0 {
 			return fmt.Errorf("Empty file name received")
 		}
 
-		baseFile := filepath.Base(filename)
-		if !w.conf.DotFiles && strings.HasPrefix(baseFile, ".") {
-			return fmt.Errorf("Dotfile ignored: %s", filename)
+		if !acceptedByFilters(normName) {
+			w.logger.Info(fmt.Sprintf("Not accepted by filters %s", normName))
+			return nil
 		}
 
-		w.logger.Info(fmt.Sprintf("Handling %s", filename))
+		baseFile := filepath.Base(normName)
+		if !w.conf.DotFiles && strings.HasPrefix(baseFile, ".") {
+			return fmt.Errorf("Dotfile ignored: %s", normName)
+		}
+
+		w.logger.Info(fmt.Sprintf("Handling %s", normName))
 
 		file := &File{
 			Name:     filename,
-			NormName: filepath.ToSlash(filepath.Clean(filename)),
+			NormName: normName,
 			Forced:   forced,
 		}
 
