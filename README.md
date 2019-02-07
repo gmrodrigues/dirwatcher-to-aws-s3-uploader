@@ -42,7 +42,7 @@ filter:
       --watcher.filter.blacklist=    Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name.
                                      [$WATCH_FILTER_BLACKLIST]
       --watcher.filter.whitelist=    Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name.
-                                     [$WATCH_FILTER_BLACKLIST]
+                                     [$WATCH_FILTER_WHITELIST]
 
 ddagent:
       --dd.agent-address=            DataDog agent address (default: 127.0.0.1:8126) [$AGENT_ADDR]
