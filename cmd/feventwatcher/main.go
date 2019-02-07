@@ -82,7 +82,7 @@ type Options struct {
 type handleFunc func(pspan opentracing.Span, json []byte)
 
 func main() {
-
+	// runtime.GOMAXPROCS(runtime.NumCPU())
 	opts := Options{}
 	_, err := flags.ParseArgs(&opts, os.Args)
 

@@ -126,7 +126,7 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 
 	}
 
-	EVENT_BUFFER_SIZE := 1024 * 1024
+	EVENT_BUFFER_SIZE := 1024 * 1024 * 100
 	w.subs = make([]chan *WatcherEvent, 0)
 	w.in = make(chan *File, EVENT_BUFFER_SIZE)
 	w.out = make(chan *CoolDownDone, EVENT_BUFFER_SIZE)
@@ -170,40 +170,11 @@ func (w *Watcher) Start() error {
 	defer w.logger.Sync()
 	defer w.watcher.Close()
 
-	anyWhiteListFilter := len(w.filter.regxpWL) > 0
-	anyFilter := anyWhiteListFilter || len(w.filter.regxpBL) > 0
-
-	acceptedByFilters := func(normName string) bool {
-		accepted := true
-		if anyFilter {
-			for _, m := range w.filter.regxpBL {
-				if m.MatchString(normName) {
-					w.logger.Info(fmt.Sprintf("Blacklisted %s", normName))
-					return false
-				}
-			}
-			for _, m := range w.filter.regxpWL {
-				accepted = false
-				if m.MatchString(normName) {
-					w.logger.Info(fmt.Sprintf("Whitelisted %s", normName))
-					return true
-				}
-			}
-			return accepted
-		}
-		return accepted
-	}
-
 	handle := func(filename string, forced bool) error {
 		normName := filepath.ToSlash(filepath.Clean(filename))
 
 		if len(filename) == 0 {
 			return fmt.Errorf("Empty file name received")
-		}
-
-		if !acceptedByFilters(normName) {
-			w.logger.Info(fmt.Sprintf("Not accepted by filters %s", normName))
-			return nil
 		}
 
 		baseFile := filepath.Base(normName)
@@ -273,6 +244,29 @@ func (w *Watcher) walkPush() {
 
 func (w *Watcher) cooldownNotifyLoop() {
 
+	anyWhiteListFilter := len(w.filter.regxpWL) > 0
+	anyFilter := anyWhiteListFilter || len(w.filter.regxpBL) > 0
+	acceptedByFilters := func(normName string) bool {
+		accepted := true
+		if anyFilter {
+			for _, m := range w.filter.regxpBL {
+				if m.MatchString(normName) {
+					w.logger.Info(fmt.Sprintf("Blacklisted %s", normName))
+					return false
+				}
+			}
+			for _, m := range w.filter.regxpWL {
+				accepted = false
+				if m.MatchString(normName) {
+					w.logger.Info(fmt.Sprintf("Whitelisted %s", normName))
+					return true
+				}
+			}
+			return accepted
+		}
+		return accepted
+	}
+
 	handleIn := func(file *File) {
 		w.watcher.Add(file.NormName)
 
@@ -315,6 +309,15 @@ func (w *Watcher) cooldownNotifyLoop() {
 				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
 		}
+
+		if !acceptedByFilters(file.NormName) {
+			w.logger.Info(fmt.Sprintf("Not accepted by filters %s", file.NormName))
+			if !file.IsDir {
+				w.watcher.Remove(file.NormName)
+			}
+			return
+		}
+
 		e := &WatcherEvent{
 			Version:     EVENT_FORMAT_VERSION,
 			UUID:        uuid.New().String(),
