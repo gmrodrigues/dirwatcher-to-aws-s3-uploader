@@ -2,7 +2,15 @@
 
 
 [[projects]]
-  digest = "1:470846d6303b2eb27688b55e309762126b7aece46667b49b2dff718c701cd26c"
+  digest = "1:9f3b30d9f8e0d7040f729b82dcbc8f0dead820a133b3147ce355fc451f32d761"
+  name = "github.com/BurntSushi/toml"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "3012a1dbe2e4bd1391d42b32f0577cb7bbc7f005"
+  version = "v0.3.1"
+
+[[projects]]
+  digest = "1:aad10d04ca5339cc8994c0519518dc02ec51668929cbd8b26774b37b24f5695d"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -37,16 +45,16 @@
     "service/sts",
   ]
   pruneopts = "UT"
-  revision = "81f3829f5a9d041041bdf56e55926691309d7699"
-  version = "v1.16.26"
+  revision = "fcb19ead441f7659dd7d7589ff3fb0b45a24d863"
+  version = "v1.18.6"
 
 [[projects]]
   branch = "master"
-  digest = "1:57cfa1b2801c146d64c3555549d33a8236b7eadd88f2fcc71c2ff68658838e69"
+  digest = "1:c0e6b89dc337d534a762ce442c734579928118ed1a6abd973bba060fee53a2b4"
   name = "github.com/beanstalkd/go-beanstalk"
   packages = ["."]
   pruneopts = "UT"
-  revision = "28608e928096371735513b8797a9776d2e114b98"
+  revision = "7a112881e6c4f85f0d98f8929536e775d31fb4de"
 
 [[projects]]
   digest = "1:abeb38ade3f32a92943e5be54f55ed6d6e3b6602761d74b4aab4c9dd45c18abd"
@@ -57,7 +65,7 @@
   version = "v1.4.7"
 
 [[projects]]
-  digest = "1:ad53d1f710522a38d1f0e5e0a55a194b1c6b2cd8e84313568e43523271f0cf62"
+  digest = "1:33082c63746b464db3d1c2c07a1396d860484d97fe857ef9e8668a9b406db09f"
   name = "github.com/go-redis/redis"
   packages = [
     ".",
@@ -69,8 +77,8 @@
     "internal/util",
   ]
   pruneopts = "UT"
-  revision = "22be8a3eaf992c828cecb69dc07348313bf08d2e"
-  version = "v6.15.1"
+  revision = "d22fde8721cc915a55aeb6b00944a76a92bfeb6e"
+  version = "v6.15.2"
 
 [[projects]]
   branch = "master"
@@ -81,12 +89,12 @@
   revision = "c71e233f94bd5df438d6a1f215858bda9c1e7502"
 
 [[projects]]
-  digest = "1:236d7e1bdb50d8f68559af37dbcf9d142d56b431c9b2176d41e2a009b664cda8"
+  digest = "1:582b704bebaa06b48c29b0cec224a6058a09c86883aaddabde889cd1a5f73e1b"
   name = "github.com/google/uuid"
   packages = ["."]
   pruneopts = "UT"
-  revision = "9b3b1e0f5f99ae461456d768e7d301a7acdaa2d8"
-  version = "v1.1.0"
+  revision = "0cd6bf5da1e1c83f8b45653022c74f71af0538a4"
+  version = "v1.1.1"
 
 [[projects]]
   digest = "1:a2cff208d4759f6ba1b1cd228587b0a1869f95f22542ec9cd17fff64430113c7"
@@ -95,6 +103,14 @@
   pruneopts = "UT"
   revision = "c6ca198ec95c841fdb89fc0de7496fed11ab854e"
   version = "v1.4.0"
+
+[[projects]]
+  digest = "1:0f65b10afa740ebce239838198b7647ca95c6395738bbaec5748aceece17b07c"
+  name = "github.com/jinzhu/configor"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "4edaf76fe18865e36de734d887f4c01bd05707af"
+  version = "v1.0.0"
 
 [[projects]]
   digest = "1:bb81097a5b62634f3e9fec1014657855610c82d19b9a40c17612e32651e35dca"
@@ -167,21 +183,21 @@
   name = "golang.org/x/net"
   packages = ["context"]
   pruneopts = "UT"
-  revision = "d26f9f9a57f3fab6a695bec0d84433c2c50f8bbf"
+  revision = "1272bf9dcd53ea65c09668fb4c76e65deb740072"
 
 [[projects]]
   branch = "master"
-  digest = "1:a1914323eabb0da3b4392fb0d34b1ae5b6b531323daf4eeddc355d8000982052"
+  digest = "1:1aa109187d52894bd8929a34a0a483ea4e57d7e32e86d81c64cea84c1978d68e"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "41f3e6584952bb034a481797859f6ab34b6803bd"
+  revision = "6c81ef8f67ca3f42fc9cd71dfbd5f35b0c4b5771"
 
 [[projects]]
-  digest = "1:3ea903182d4c09c8d71aa15df6e06a4306c108b11763632e3a64010ba8f6f5a0"
+  digest = "1:504a6a229cf1fcbe6f7f61063d0728ac9615aeb19ce27a7708b228f92d40d386"
   name = "gopkg.in/DataDog/dd-trace-go.v1"
   packages = [
     "ddtrace",
@@ -191,8 +207,16 @@
     "ddtrace/tracer",
   ]
   pruneopts = "UT"
-  revision = "823d51722f66a748804943f6fa6be18776073b82"
-  version = "v1.9.0"
+  revision = "fd9dc1465a7f279ce06639563428b56b01c3b146"
+  version = "v1.10.0"
+
+[[projects]]
+  digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
+  name = "gopkg.in/yaml.v2"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "51d6538a90f86fe93ac480b35f37b2be17fef232"
+  version = "v2.2.2"
 
 [solve-meta]
   analyzer-name = "dep"
@@ -209,6 +233,7 @@
     "github.com/goinggo/tracelog",
     "github.com/google/uuid",
     "github.com/jessevdk/go-flags",
+    "github.com/jinzhu/configor",
     "github.com/opentracing/opentracing-go",
     "go.uber.org/zap",
     "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext",

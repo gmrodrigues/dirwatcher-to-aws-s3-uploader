@@ -56,7 +56,7 @@ type CoolDownDone struct {
 }
 
 type Watcher struct {
-	conf    WatcherConf
+	conf    *WatcherConf
 	watcher *fsnotify.Watcher
 	filter  struct {
 		regxpWL []*regexp.Regexp
@@ -86,6 +86,7 @@ type FileInfo struct {
 
 type Watchable interface {
 	Conf() WatcherConf
+	UpdateConf(conf WatcherConf) error
 	SubscribeChan(ch chan *WatcherEvent) error
 	SubscribeFunc(f func(e *WatcherEvent)) error
 	Start() error
@@ -97,23 +98,10 @@ func NewWatcherEventChan() chan *WatcherEvent {
 }
 
 func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
-	w := &Watcher{conf: conf}
-
-	//init black and white lists
-	for _, s := range w.conf.RegexWhiteList {
-		r, err := regexp.Compile(s)
-		if err != nil {
-			return nil, fmt.Errorf("Regex [%s] for white list [%s]: %s", s, conf.BaseDir, err.Error())
-		}
-		w.filter.regxpWL = append(w.filter.regxpWL, r)
-	}
-
-	for _, s := range w.conf.RegexBlackList {
-		r, err := regexp.Compile(s)
-		if err != nil {
-			return nil, fmt.Errorf("Regex [%s] for black list [%s]: %s", s, conf.BaseDir, err.Error())
-		}
-		w.filter.regxpBL = append(w.filter.regxpBL, r)
+	w := &Watcher{conf: &conf}
+	err = w.UpdateConf(*w.conf)
+	if err != nil {
+		return nil, err
 	}
 
 	// init watcher
@@ -126,7 +114,7 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 
 	}
 
-	EVENT_BUFFER_SIZE := 1024 * 1024 * 100
+	EVENT_BUFFER_SIZE := 1024 * 100
 	w.subs = make([]chan *WatcherEvent, 0)
 	w.in = make(chan *File, EVENT_BUFFER_SIZE)
 	w.out = make(chan *CoolDownDone, EVENT_BUFFER_SIZE)
@@ -232,7 +220,9 @@ func (w *Watcher) Start() error {
 func (w *Watcher) walkPush() {
 	walkVisit := func(path string, f os.FileInfo, err error) error {
 		w.logger.Info(fmt.Sprintf("Walk push %s", path))
-		w.pushed <- path
+		if f.IsDir() || w.acceptedByFilters(filepath.Clean(path)) {
+			w.pushed <- path
+		}
 		return nil
 	}
 
@@ -242,30 +232,31 @@ func (w *Watcher) walkPush() {
 	}
 }
 
-func (w *Watcher) cooldownNotifyLoop() {
+func (w *Watcher) acceptedByFilters(normName string) bool {
 
 	anyWhiteListFilter := len(w.filter.regxpWL) > 0
 	anyFilter := anyWhiteListFilter || len(w.filter.regxpBL) > 0
-	acceptedByFilters := func(normName string) bool {
-		accepted := true
-		if anyFilter {
-			for _, m := range w.filter.regxpBL {
-				if m.MatchString(normName) {
-					w.logger.Info(fmt.Sprintf("Blacklisted %s", normName))
-					return false
-				}
+	accepted := true
+	if anyFilter {
+		for _, m := range w.filter.regxpBL {
+			if m.MatchString(normName) {
+				w.logger.Info(fmt.Sprintf("Blacklisted %s", normName))
+				return false
 			}
-			for _, m := range w.filter.regxpWL {
-				accepted = false
-				if m.MatchString(normName) {
-					w.logger.Info(fmt.Sprintf("Whitelisted %s", normName))
-					return true
-				}
+		}
+		for _, m := range w.filter.regxpWL {
+			accepted = false
+			if m.MatchString(normName) {
+				w.logger.Info(fmt.Sprintf("Whitelisted %s", normName))
+				return true
 			}
-			return accepted
 		}
 		return accepted
 	}
+	return accepted
+}
+
+func (w *Watcher) cooldownNotifyLoop() {
 
 	handleIn := func(file *File) {
 		w.watcher.Add(file.NormName)
@@ -310,9 +301,9 @@ func (w *Watcher) cooldownNotifyLoop() {
 			}
 		}
 
-		if !acceptedByFilters(file.NormName) {
+		if !w.acceptedByFilters(file.NormName) {
 			w.logger.Info(fmt.Sprintf("Not accepted by filters %s", file.NormName))
-			if !file.IsDir {
+			if !file.IsDir || !file.Exists {
 				w.watcher.Remove(file.NormName)
 			}
 			return
@@ -359,7 +350,32 @@ func (w *Watcher) ForcePushFile(filename string) (err error) {
 }
 
 func (w *Watcher) Conf() WatcherConf {
-	return w.conf
+	return *w.conf
+}
+
+func (w *Watcher) UpdateConf(conf WatcherConf) error {
+	w.conf.Cooldown.CounterMillis = conf.Cooldown.CounterMillis
+	w.conf.RegexWhiteList = conf.RegexWhiteList
+	w.conf.RegexBlackList = conf.RegexBlackList
+
+	//init black and white lists
+	for _, s := range w.conf.RegexWhiteList {
+		r, err := regexp.Compile(s)
+		if err != nil {
+			return fmt.Errorf("Regex [%s] for white list [%s]: %s", s, conf.BaseDir, err.Error())
+		}
+		w.filter.regxpWL = append(w.filter.regxpWL, r)
+	}
+
+	for _, s := range w.conf.RegexBlackList {
+		r, err := regexp.Compile(s)
+		if err != nil {
+			return fmt.Errorf("Regex [%s] for black list [%s]: %s", s, conf.BaseDir, err.Error())
+		}
+		w.filter.regxpBL = append(w.filter.regxpBL, r)
+	}
+
+	return nil
 }
 
 func (w *Watcher) SubscribeChan(ch chan *WatcherEvent) error {

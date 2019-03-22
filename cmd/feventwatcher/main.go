@@ -23,6 +23,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gmrodrigues/feventwatcher/pkg/feventwatcher"
 	"github.com/gmrodrigues/feventwatcher/pkg/modules/aws"
@@ -30,6 +31,7 @@ import (
 	"github.com/gmrodrigues/feventwatcher/pkg/modules/redis"
 	"github.com/goinggo/tracelog"
 	flags "github.com/jessevdk/go-flags"
+	"github.com/jinzhu/configor"
 	opentracing "github.com/opentracing/opentracing-go"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/ext"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/opentracer"
@@ -37,7 +39,8 @@ import (
 )
 
 type Options struct {
-	Watch struct {
+	LiveConf string `description:"Live config file path. Checked every second for updates. See file-conf.yaml.sample" long:"live-conf-file" short:"c"`
+	Watch    struct {
 		Basepath              []string `description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH" required:"true"`
 		CooldownMillis        uint64   `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
 		ResourceNameFileDepth uint8    `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
@@ -241,8 +244,28 @@ func main() {
 	fmt.Print("Starting ...")
 	tracelog.Start(tracelog.LevelTrace)
 	var wg sync.WaitGroup
-	for _, basepath := range opts.Watch.Basepath {
-		//fmt.Printf("File %s\n", dirname)
+	watchers := make(map[string]feventwatcher.Watchable)
+
+	updateWatcher := func(basepath string, opts Options) {
+		w := watchers[basepath]
+		if w == nil {
+			return
+		}
+		conf := feventwatcher.WatcherConf{
+			Cooldown: feventwatcher.EventCooldownConf{
+				CounterMillis: opts.Watch.CooldownMillis,
+			},
+			RegexWhiteList: opts.Watch.Filter.RegexWhiteList,
+			RegexBlackList: opts.Watch.Filter.RegexBlackList,
+		}
+
+		w.UpdateConf(conf)
+	}
+
+	startWatcher := func(basepath string, opts Options) {
+		if watchers[basepath] != nil {
+			updateWatcher(basepath, opts)
+		}
 		conf := feventwatcher.WatcherConf{
 			BaseDir: basepath,
 			Cooldown: feventwatcher.EventCooldownConf{
@@ -261,9 +284,50 @@ func main() {
 		fmt.Println("Starting watcher with confs: %#v", conf)
 		w.SubscribeFunc(handler)
 		wg.Add(1)
+		watchers[basepath] = w
 		go func() {
 			defer wg.Done()
 			w.Start()
+		}()
+	}
+
+	for _, basepath := range opts.Watch.Basepath {
+		//fmt.Printf("File %s\n", dirname)
+		startWatcher(basepath, opts)
+	}
+
+	if opts.LiveConf != "" {
+		go func() {
+			var lastStats os.FileInfo
+			for ; true; time.Sleep(1 * time.Second) {
+
+				if stats, err := os.Stat(opts.LiveConf); err != nil || stats.ModTime() == lastStats.ModTime() {
+					continue
+				} else {
+					lastStats = stats
+				}
+
+				newOpts := &Options{}
+				configor.Load(newOpts, opts.LiveConf)
+				if len(opts.Watch.Basepath) < 1 {
+					fmt.Println("Cannot use conf file %s: no watch diretories found", opts.LiveConf)
+					continue
+				}
+
+				oldDirs := opts.Watch.Basepath
+				opts.Watch = newOpts.Watch
+				newDirs := make(map[string]bool)
+				for _, dirpath := range newOpts.Watch.Basepath {
+					newDirs[dirpath] = true
+					startWatcher(dirpath, opts)
+				}
+
+				for _, oldDirpath := range oldDirs {
+					if newDirs[oldDirpath] != true {
+						watchers[oldDirpath].Done()
+					}
+				}
+			}
 		}()
 	}
 
