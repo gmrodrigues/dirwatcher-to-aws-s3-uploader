@@ -27,7 +27,7 @@
 
 [[constraint]]
   name = "github.com/aws/aws-sdk-go"
-  version = "1.18.6"
+  version = "1.19.1"
 
 [[constraint]]
   branch = "master"
@@ -59,7 +59,7 @@
 
 [[constraint]]
   name = "github.com/opentracing/opentracing-go"
-  version = "1.0.2"
+  version = "1.1.0"
 
 [[constraint]]
   name = "go.uber.org/zap"
@@ -67,7 +67,7 @@
 
 [[constraint]]
   name = "gopkg.in/DataDog/dd-trace-go.v1"
-  version = "1.10.0"
+  version = "1.11.0"
 
 [prune]
   go-tests = true

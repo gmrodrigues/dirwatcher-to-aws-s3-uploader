@@ -31,6 +31,11 @@ const (
 	// with "Key*" (KeySpanType, etc) to more easily differentiate between
 	// constants representing tag values and constants representing keys.
 
+	// SpanName is a pseudo-key for setting a span's operation name by means of
+	// a tag. It is mostly here to facilitate vendor-agnostic frameworks like Opentracing
+	// and OpenCensus.
+	SpanName = "span.name"
+
 	// SpanType defines the Span type (web, db, cache).
 	SpanType = "span.type"
 
@@ -58,4 +63,8 @@ const (
 	// EventSampleRate specifies the rate at which this span will be sampled
 	// as an APM event.
 	EventSampleRate = "_dd1.sr.eausr"
+
+	// AnalyticsEvent specifies whether the span should be recorded as a Trace
+	// Search & Analytics event.
+	AnalyticsEvent = "analytics.event"
 )

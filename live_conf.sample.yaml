@@ -1,0 +1,7 @@
+watch:
+  basepath:
+    - /tmp
+    - /var/log
+  filter:
+    regexBlackList:
+      - BACKUP

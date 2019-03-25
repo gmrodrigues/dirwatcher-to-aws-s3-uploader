@@ -38,10 +38,11 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
+
 type Options struct {
 	LiveConf string `description:"Live config file path. Checked every second for updates. See file-conf.yaml.sample" long:"live-conf-file" short:"c"`
 	Watch    struct {
-		Basepath              []string `description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH" required:"true"`
+		Basepath              []string `description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH"`
 		CooldownMillis        uint64   `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
 		ResourceNameFileDepth uint8    `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
 		Meta                  string   `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
@@ -82,6 +83,44 @@ type Options struct {
 	Debug []bool `description:"Debug mode, use multiple times to raise verbosity" short:"d" long:"debug"`
 }
 
+func checkMandatoryArgs(o Options) error {
+	hasBasePaths := false
+	var errMsgs []string
+	for _, basepath := range o.Watch.Basepath {
+		_, err := os.Stat(basepath)
+		if err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			continue
+		}else{
+			hasBasePaths = true
+		}		
+	}
+	if len(o.LiveConf) > 0 {
+		_, err := loadOptions(o.LiveConf)
+		if err != nil {
+			errMsgs = append(errMsgs, err.Error())
+		}else{
+			hasBasePaths = true
+		}		
+	}
+	if !hasBasePaths {
+		errMsgs = append(errMsgs, "No basepaths found")
+	}
+	if len(errMsgs) > 0 {
+		return fmt.Errorf("Error checking mandatory args: [%s]", strings.Join(errMsgs, "] ["))
+	}
+	return nil
+}
+
+func loadOptions(confFile string) (*Options, error) {
+	opts := &Options{}
+	err := configor.Load(opts, confFile)
+	if len(opts.Watch.Basepath) < 1 {
+		return nil, fmt.Errorf("Cannot use conf file %s: no watch diretories found.\n %#v", confFile, opts)
+	}
+	return opts, err
+}
+
 type handleFunc func(pspan opentracing.Span, json []byte)
 
 func main() {
@@ -94,7 +133,12 @@ func main() {
 			fmt.Println(err.Error())
 		}
 		os.Exit(-1)
+	}else if err = checkMandatoryArgs(opts); err != nil {
+		fmt.Println(err.Error())
+		fmt.Println("\nPlease refer to --help for help")
+		os.Exit(-1)		
 	}
+	fmt.Println("Args accepted")
 
 	debug := len(opts.Debug) > 0
 
@@ -263,6 +307,7 @@ func main() {
 	}
 
 	startWatcher := func(basepath string, opts Options) {
+		fmt.Printf("Start watcher on: %s", basepath)
 		if watchers[basepath] != nil {
 			updateWatcher(basepath, opts)
 		}
@@ -297,23 +342,25 @@ func main() {
 	}
 
 	if opts.LiveConf != "" {
+		wg.Add(1)			
 		go func() {
+			defer wg.Done()
+			fmt.Printf("Start liconf config from %s", opts.LiveConf)
 			var lastStats os.FileInfo
 			for ; true; time.Sleep(1 * time.Second) {
 
-				if stats, err := os.Stat(opts.LiveConf); err != nil || stats.ModTime() == lastStats.ModTime() {
+				if stats, err := os.Stat(opts.LiveConf); err != nil || ( stats != nil &&  lastStats != nil && stats.ModTime() == lastStats.ModTime()) {
 					continue
 				} else {
 					lastStats = stats
 				}
 
-				newOpts := &Options{}
-				configor.Load(newOpts, opts.LiveConf)
-				if len(opts.Watch.Basepath) < 1 {
-					fmt.Println("Cannot use conf file %s: no watch diretories found", opts.LiveConf)
+				newOpts, err := loadOptions(opts.LiveConf)
+				if err != nil {
+					fmt.Println("Error loading LiveConf file [%s]: %s", opts.LiveConf, err.Error())
 					continue
 				}
-
+				
 				oldDirs := opts.Watch.Basepath
 				opts.Watch = newOpts.Watch
 				newDirs := make(map[string]bool)

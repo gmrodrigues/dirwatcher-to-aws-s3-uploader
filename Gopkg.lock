@@ -10,7 +10,7 @@
   version = "v0.3.1"
 
 [[projects]]
-  digest = "1:aad10d04ca5339cc8994c0519518dc02ec51668929cbd8b26774b37b24f5695d"
+  digest = "1:a4426a32c809e4e294f771b63174e1f7fea1175d98b3e6c83201ee4c49f734cd"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -45,8 +45,8 @@
     "service/sts",
   ]
   pruneopts = "UT"
-  revision = "fcb19ead441f7659dd7d7589ff3fb0b45a24d863"
-  version = "v1.18.6"
+  revision = "f778816ebd8f4a83264c207c77e6bcd0a5a76603"
+  version = "v1.19.1"
 
 [[projects]]
   branch = "master"
@@ -120,15 +120,15 @@
   revision = "c2b33e84"
 
 [[projects]]
-  digest = "1:9d7b1f07e44cada28e6160cb0a808ad2f71f32bd7114793fb0baa302db0e6229"
+  digest = "1:90e282624796901d91e49c98f4a05dc4f6136d1aab7af39bd3dcf3e989273650"
   name = "github.com/opentracing/opentracing-go"
   packages = [
     ".",
     "log",
   ]
   pruneopts = "UT"
-  revision = "1949ddbfd147afd4d964a9f00b24eb291e0e7c38"
-  version = "v1.0.2"
+  revision = "659c90643e714681897ec2521c60567dd21da733"
+  version = "v1.1.0"
 
 [[projects]]
   digest = "1:5e73b34a27d827212102605789de00bd411b2e434812133c83935fe9897c75e1"
@@ -179,25 +179,17 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:76ee51c3f468493aff39dbacc401e8831fbb765104cbf613b89bef01cf4bad70"
-  name = "golang.org/x/net"
-  packages = ["context"]
-  pruneopts = "UT"
-  revision = "1272bf9dcd53ea65c09668fb4c76e65deb740072"
-
-[[projects]]
-  branch = "master"
-  digest = "1:1aa109187d52894bd8929a34a0a483ea4e57d7e32e86d81c64cea84c1978d68e"
+  digest = "1:6b3e6ddcebac95be1d690dbd53b5aa2e520715becb7e521bb526ccf3b4c53c15"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "6c81ef8f67ca3f42fc9cd71dfbd5f35b0c4b5771"
+  revision = "f49334f85ddcf0f08d7fb6dd7363e9e6d6b777eb"
 
 [[projects]]
-  digest = "1:504a6a229cf1fcbe6f7f61063d0728ac9615aeb19ce27a7708b228f92d40d386"
+  digest = "1:422388edeb59d37f39de765ded27bb65f02194f75da31b2ee8ab69a82f6d5f43"
   name = "gopkg.in/DataDog/dd-trace-go.v1"
   packages = [
     "ddtrace",
@@ -205,10 +197,11 @@
     "ddtrace/internal",
     "ddtrace/opentracer",
     "ddtrace/tracer",
+    "internal/globalconfig",
   ]
   pruneopts = "UT"
-  revision = "fd9dc1465a7f279ce06639563428b56b01c3b146"
-  version = "v1.10.0"
+  revision = "3ef2dec79bafa118bf2b13fb9f21a7c97a727853"
+  version = "v1.11.0"
 
 [[projects]]
   digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
