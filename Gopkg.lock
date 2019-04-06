@@ -10,7 +10,7 @@
   version = "v0.3.1"
 
 [[projects]]
-  digest = "1:a4426a32c809e4e294f771b63174e1f7fea1175d98b3e6c83201ee4c49f734cd"
+  digest = "1:90aa19342cefff78b9ee44aeed5a1946d893bd96fbcffc8085280138c86d8bcb"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -45,8 +45,8 @@
     "service/sts",
   ]
   pruneopts = "UT"
-  revision = "f778816ebd8f4a83264c207c77e6bcd0a5a76603"
-  version = "v1.19.1"
+  revision = "56c1def75689cceec1fa6f14c2eedb4b798827f9"
+  version = "v1.19.11"
 
 [[projects]]
   branch = "master"
@@ -179,17 +179,17 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:6b3e6ddcebac95be1d690dbd53b5aa2e520715becb7e521bb526ccf3b4c53c15"
+  digest = "1:503f66aac79cb9135d73679c7fa3e95a6fad82a3da399c505ea282b50ff03723"
   name = "golang.org/x/sys"
   packages = [
     "unix",
     "windows",
   ]
   pruneopts = "UT"
-  revision = "f49334f85ddcf0f08d7fb6dd7363e9e6d6b777eb"
+  revision = "4b34438f7a67ee5f45cc6132e2bad873a20324e9"
 
 [[projects]]
-  digest = "1:422388edeb59d37f39de765ded27bb65f02194f75da31b2ee8ab69a82f6d5f43"
+  digest = "1:000064987e61d2e6a5d664a9261f9e9f9d113af8c8c4ff21893883899f003a73"
   name = "gopkg.in/DataDog/dd-trace-go.v1"
   packages = [
     "ddtrace",
@@ -200,8 +200,8 @@
     "internal/globalconfig",
   ]
   pruneopts = "UT"
-  revision = "3ef2dec79bafa118bf2b13fb9f21a7c97a727853"
-  version = "v1.11.0"
+  revision = "2555c24d73e2dc1e111296d0bedcafb2b074dc7c"
+  version = "v1.12.1"
 
 [[projects]]
   digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"

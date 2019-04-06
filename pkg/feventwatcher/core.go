@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -23,11 +24,12 @@ type File struct {
 }
 
 type EventCooldownConf struct {
-	CounterMillis uint64 `default:"1000"`
+	CounterMillis int64 `default:"1000"`
 }
 
 type WatcherConf struct {
 	BaseDir        string
+	SubLevelsDepth int
 	DotFiles       bool
 	RegexWhiteList []string
 	RegexBlackList []string
@@ -59,8 +61,10 @@ type Watcher struct {
 	conf    *WatcherConf
 	watcher *fsnotify.Watcher
 	filter  struct {
-		regxpWL []*regexp.Regexp
-		regxpBL []*regexp.Regexp
+		depthFileRexp *regexp.Regexp
+		depthDirRexp  *regexp.Regexp
+		regxpWL       []*regexp.Regexp
+		regxpBL       []*regexp.Regexp
 	}
 	done           chan bool
 	subs           []chan *WatcherEvent
@@ -107,7 +111,7 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 	// init watcher
 	conf.BaseDir = filepath.ToSlash(filepath.Clean(conf.BaseDir))
 	w.watcher, err = fsnotify.NewWatcher()
-	w.logger, _ = zap.NewDevelopment()
+	w.logger, _ = zap.NewProduction()
 	defer w.logger.Sync()
 	if err != nil {
 		// w.logger.Fatal(err.Error())
@@ -185,7 +189,7 @@ func (w *Watcher) Start() error {
 	}
 
 	go w.cooldownNotifyLoop()
-	go w.walkPush()
+	go w.walkPush(w.conf.BaseDir)
 
 	for {
 		w.logger.Debug("Main Loop")
@@ -200,7 +204,7 @@ func (w *Watcher) Start() error {
 			if err != nil {
 				w.logger.Error(fmt.Sprintf("Err: %s", err.Error()))
 			} else {
-				w.logger.Error(fmt.Sprintf("Erro locao ok: %v", ok))
+				w.logger.Error(fmt.Sprintf("Impossible error: ok[%v]", ok))
 			}
 			continue
 		case filename := <-w.pushed:
@@ -217,19 +221,33 @@ func (w *Watcher) Start() error {
 	}
 }
 
-func (w *Watcher) walkPush() {
-	walkVisit := func(path string, f os.FileInfo, err error) error {
-		w.logger.Info(fmt.Sprintf("Walk push %s", path))
-		if f.IsDir() || w.acceptedByFilters(filepath.Clean(path)) {
-			w.pushed <- path
+func (w *Watcher) walkPush(path string) {
+
+	if w.ForcePushFile(path) {
+		globStr := filepath.Join(path, "*")
+		globs, _ := filepath.Glob(globStr)
+		if len(globs) > 0 {
+			w.logger.Info(fmt.Sprintf("[Start] Walking and Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, path))
+			defer w.logger.Info(fmt.Sprintf("[Done]  Walking and Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, path))
+
+			for _, subPath := range globs {
+				normSubPath := filepath.Clean(subPath)
+				w.walkPush(normSubPath)
+			}
 		}
-		return nil
 	}
 
-	err := filepath.Walk(w.conf.BaseDir, walkVisit)
-	if err != nil {
-		w.logger.Error(fmt.Sprintf("Error on Walking and Pushing files on %s: %s", w.conf.BaseDir, err.Error()))
-	}
+	return
+}
+
+func (w *Watcher) isFilePathTooDeep(normName string) bool {
+	// in a subdirectory too deep
+	return !w.filter.depthFileRexp.MatchString(normName)
+}
+
+func (w *Watcher) isDirPathTooDeep(normName string) bool {
+	// in a subdirectory too deep
+	return !w.filter.depthDirRexp.MatchString(normName)
 }
 
 func (w *Watcher) acceptedByFilters(normName string) bool {
@@ -259,6 +277,7 @@ func (w *Watcher) acceptedByFilters(normName string) bool {
 func (w *Watcher) cooldownNotifyLoop() {
 
 	handleIn := func(file *File) {
+
 		w.watcher.Add(file.NormName)
 
 		ce := w.coolingEvents[file.NormName]
@@ -277,6 +296,7 @@ func (w *Watcher) cooldownNotifyLoop() {
 		s <- we
 	}
 	handleOut := func(cdd *CoolDownDone) {
+
 		file := cdd.file
 		delete(w.coolingEvents, file.NormName)
 
@@ -299,6 +319,23 @@ func (w *Watcher) cooldownNotifyLoop() {
 				ModTime: stat.ModTime(), // modification time
 				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
+		}
+
+		dirTooDeep := file.IsDir && w.isDirPathTooDeep(file.NormName)
+		fileTooDeep := !file.IsDir && w.isFilePathTooDeep(file.NormName)
+
+		if fileTooDeep || dirTooDeep {
+			w.logger.Info(fmt.Sprintf("Not accepted by depth[%v]: %s [is_dir=%v]", w.conf.SubLevelsDepth, file.NormName, file.IsDir))
+			w.watcher.Remove(file.NormName)
+			return
+		}
+
+		if !w.acceptedByFilters(file.NormName) {
+			w.logger.Info(fmt.Sprintf("Not accepted by filters %s", file.NormName))
+			if !file.IsDir || !file.Exists {
+				w.watcher.Remove(file.NormName)
+			}
+			return
 		}
 
 		if !w.acceptedByFilters(file.NormName) {
@@ -344,9 +381,26 @@ func (w *Watcher) cooldownNotifyLoop() {
 	}
 }
 
-func (w *Watcher) ForcePushFile(filename string) (err error) {
-	w.pushed <- filename
-	return nil
+func (w *Watcher) ForcePushFile(filename string) (success bool) {
+	if stat, err := os.Stat(filename); err == nil {
+		dirDeepOK := stat.IsDir() && !w.isDirPathTooDeep(filename)
+		fileDeepOK := !stat.IsDir() && !w.isFilePathTooDeep(filename)
+
+		if dirDeepOK || fileDeepOK {
+			w.pushed <- filename
+			w.logger.Info(fmt.Sprintf("[Force] Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, filename))
+			return true
+		} else if stat.IsDir() {
+			w.logger.Info(fmt.Sprintf("[No-op] Not Pushing deep[%v] directory: %s", w.conf.SubLevelsDepth, filename))
+			return false
+		} else {
+			w.logger.Info(fmt.Sprintf("[No-op] Not Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, filename))
+			return false
+		}
+	}
+
+	w.logger.Info(fmt.Sprintf("[No-op] Not Pushing deep[%v] unknown file: %s", w.conf.SubLevelsDepth, filename))
+	return false
 }
 
 func (w *Watcher) Conf() WatcherConf {
@@ -357,6 +411,22 @@ func (w *Watcher) UpdateConf(conf WatcherConf) error {
 	w.conf.Cooldown.CounterMillis = conf.Cooldown.CounterMillis
 	w.conf.RegexWhiteList = conf.RegexWhiteList
 	w.conf.RegexBlackList = conf.RegexBlackList
+	w.conf.SubLevelsDepth = conf.SubLevelsDepth
+
+	setSubLevelsRegexp := func(basepath string, levels int) {
+		abs, _ := filepath.Abs(basepath)
+		pathCrumbs := strings.Split(path.Clean(abs), "/")
+		first := "[^/]+"
+		if pathCrumbs[0] == "" {
+			first = "/[^/]+"
+			pathCrumbs = pathCrumbs[1:]
+		}
+		totalLevels := levels + len(pathCrumbs)
+
+		w.filter.depthFileRexp, _ = regexp.Compile(fmt.Sprintf("^%s(/[^/]+){0,%v}$", first, totalLevels))
+		w.filter.depthDirRexp, _ = regexp.Compile(fmt.Sprintf("^%s(/[^/]+){0,%v}$", first, totalLevels-1))
+	}
+	setSubLevelsRegexp(w.conf.BaseDir, w.conf.SubLevelsDepth)
 
 	//init black and white lists
 	for _, s := range w.conf.RegexWhiteList {

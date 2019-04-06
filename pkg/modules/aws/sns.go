@@ -16,8 +16,8 @@ type Sns struct {
 
 type SnsPublishPool struct {
 	sns           *Sns
-	poolSize      uint
-	timeoutSecond uint
+	poolSize      int
+	timeoutSecond int
 	pool          chan bool
 	jobs          chan []byte
 	stop          chan bool
@@ -32,7 +32,7 @@ func NewSns(s *Session, topicArn string) (*Sns, error) {
 	}, nil
 }
 
-func NewSnsPublishPool(sns *Sns, poolSize uint, timeoutSecond uint) *SnsPublishPool {
+func NewSnsPublishPool(sns *Sns, poolSize int, timeoutSecond int) *SnsPublishPool {
 	return &SnsPublishPool{
 		timeoutSecond: timeoutSecond,
 		sns:           sns,
@@ -47,8 +47,8 @@ func BuildSnsPool(
 	aws_access_key_id string,
 	aws_secret_access_key string,
 	topicArn string,
-	poolSize uint,
-	timeoutSecond uint) (*SnsPublishPool, error) {
+	poolSize int,
+	timeoutSecond int) (*SnsPublishPool, error) {
 	region := RegionFromArn(topicArn)
 	cred := NewCredentials(aws_access_key_id, aws_secret_access_key)
 	sess, err := NewSession(*cred, region)
@@ -63,7 +63,7 @@ func BuildSnsPool(
 	return pool, nil
 }
 
-func (s *Sns) Publish(message []byte, timeoutSecond uint) error {
+func (s *Sns) Publish(message []byte, timeoutSecond int) error {
 	if timeoutSecond == 0 {
 		timeoutSecond = 30
 	}

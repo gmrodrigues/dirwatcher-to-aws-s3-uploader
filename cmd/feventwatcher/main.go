@@ -38,19 +38,19 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
-
 type Options struct {
 	LiveConf string `description:"Live config file path. Checked every second for updates. See file-conf.yaml.sample" long:"live-conf-file" short:"c"`
 	Watch    struct {
-		Basepath              []string `description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH"`
-		CooldownMillis        uint64   `description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
-		ResourceNameFileDepth uint8    `description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
-		Meta                  string   `description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
+		Basepath              []string `yaml:"Basepath" description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH"`
+		SubLevelsDepth        int      `yaml:"SubLevelsDepth" description:"Watch subdirectories n levels of depth from Basepath" short:"l" long:"sublevels-depth" env:"SUBLEVELS_DEPTH" default:"0"`
+		CooldownMillis        int64    `yaml:"CooldownMillis" description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
+		ResourceNameFileDepth int      `yaml:"ResourceNameFileDepth" description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
+		Meta                  string   `yaml:"Meta" description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
 		Filter                struct {
-			RegexBlackList []string `description:"Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name." long:"blacklist" env:"WATCH_FILTER_BLACKLIST"`
-			RegexWhiteList []string `description:"Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name." long:"whitelist" env:"WATCH_FILTER_WHITELIST"`
-		} `group:"filter" namespace:"filter"`
-	} `group:"watch" namespace:"watcher" env-namespace:"WATCH"`
+			RegexBlackList []string `yaml:"RegexBlackList" description:"Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name." long:"blacklist" env:"WATCH_FILTER_BLACKLIST"`
+			RegexWhiteList []string `yaml:"RegexWhiteList" description:"Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name." long:"whitelist" env:"WATCH_FILTER_WHITELIST"`
+		} `yaml:"Filter" group:"filter" namespace:"filter"`
+	} `yaml:"Watch" group:"watch" namespace:"watcher" env-namespace:"WATCH"`
 	DataDogAgent struct {
 		AgentAddr   string   `description:"DataDog agent address" long:"agent-address" env:"AGENT_ADDR" default:"127.0.0.1:8126"`
 		ServiceName string   `description:"DataDog service name" long:"trace-service-name" default:"feventwatcher"`
@@ -60,7 +60,7 @@ type Options struct {
 	Beanstalkd struct {
 		Addr            string `description:"Beanstalkd (queue server) host:port (Ex: 127.0.0.1:11300)" long:"addr" env:"BEANSTALKD_ADDR"`
 		Queue           string `description:"Beanstalkd queue name)" long:"queue" env:"BEANSTALKD_QUEUE" default:"default"`
-		TimeToRunMillis uint32 `description:"Beanstalkd queue consumer's time to work before job return to queue)" long:"ttr" env:"BEANSTALKD_TTR" default:"600000"`
+		TimeToRunMillis int    `description:"Beanstalkd queue consumer's time to work before job return to queue)" long:"ttr" env:"BEANSTALKD_TTR" default:"600000"`
 	} `group:"beanstalkd" namespace:"beanstalkd" env-namespace:"BEANSTALKD"`
 	Redis struct {
 		Addr     string `description:"Redis server host:port (Ex: localhost:6379)" long:"addr" env:"REDIS_ADDR"`
@@ -73,8 +73,8 @@ type Options struct {
 		SecredAccessKey string `description:"Specifies the secret key associated with the access key. This is essentially the 'password' for the access key." long:"secred-access-key" env:"AWS_SECRET_ACCESS_KEY"`
 		Sns             struct {
 			TopicArn       []string `description:"AWS SNS topic arn to send events to. Can be set multiple times." long:"topic-arn" env:"AWS_SNS_TOPIC_ARN"`
-			PoolSize       uint     `description:"AWS SNS concurrent connections for pushing" long:"pool-size" env:"AWS_SNS_POOL_SIZE" default:"25"`
-			TimeoutSeconds uint     `description:"AWS SNS publish timout" long:"timout-seconds" env:"AWS_SNS_TIMEOUT_SECONDS" default:"5"`
+			PoolSize       int      `description:"AWS SNS concurrent connections for pushing" long:"pool-size" env:"AWS_SNS_POOL_SIZE" default:"25"`
+			TimeoutSeconds int      `description:"AWS SNS publish timout" long:"timout-seconds" env:"AWS_SNS_TIMEOUT_SECONDS" default:"5"`
 		} `group:"sns" namespace:"sns"`
 	} `group:"aws" namespace:"aws" env-namespace:"AWS"`
 	Health struct {
@@ -91,17 +91,17 @@ func checkMandatoryArgs(o Options) error {
 		if err != nil {
 			errMsgs = append(errMsgs, err.Error())
 			continue
-		}else{
+		} else {
 			hasBasePaths = true
-		}		
+		}
 	}
 	if len(o.LiveConf) > 0 {
 		_, err := loadOptions(o.LiveConf)
 		if err != nil {
 			errMsgs = append(errMsgs, err.Error())
-		}else{
+		} else {
 			hasBasePaths = true
-		}		
+		}
 	}
 	if !hasBasePaths {
 		errMsgs = append(errMsgs, "No basepaths found")
@@ -133,10 +133,10 @@ func main() {
 			fmt.Println(err.Error())
 		}
 		os.Exit(-1)
-	}else if err = checkMandatoryArgs(opts); err != nil {
+	} else if err = checkMandatoryArgs(opts); err != nil {
 		fmt.Println(err.Error())
 		fmt.Println("\nPlease refer to --help for help")
-		os.Exit(-1)		
+		os.Exit(-1)
 	}
 	fmt.Println("Args accepted")
 
@@ -296,6 +296,7 @@ func main() {
 			return
 		}
 		conf := feventwatcher.WatcherConf{
+			SubLevelsDepth: opts.Watch.SubLevelsDepth,
 			Cooldown: feventwatcher.EventCooldownConf{
 				CounterMillis: opts.Watch.CooldownMillis,
 			},
@@ -312,7 +313,8 @@ func main() {
 			updateWatcher(basepath, opts)
 		}
 		conf := feventwatcher.WatcherConf{
-			BaseDir: basepath,
+			BaseDir:        basepath,
+			SubLevelsDepth: opts.Watch.SubLevelsDepth,
 			Cooldown: feventwatcher.EventCooldownConf{
 				CounterMillis: opts.Watch.CooldownMillis,
 			},
@@ -342,14 +344,14 @@ func main() {
 	}
 
 	if opts.LiveConf != "" {
-		wg.Add(1)			
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			fmt.Printf("Start liconf config from %s", opts.LiveConf)
 			var lastStats os.FileInfo
 			for ; true; time.Sleep(1 * time.Second) {
 
-				if stats, err := os.Stat(opts.LiveConf); err != nil || ( stats != nil &&  lastStats != nil && stats.ModTime() == lastStats.ModTime()) {
+				if stats, err := os.Stat(opts.LiveConf); err != nil || (stats != nil && lastStats != nil && stats.ModTime() == lastStats.ModTime()) {
 					continue
 				} else {
 					lastStats = stats
@@ -357,12 +359,13 @@ func main() {
 
 				newOpts, err := loadOptions(opts.LiveConf)
 				if err != nil {
-					fmt.Println("Error loading LiveConf file [%s]: %s", opts.LiveConf, err.Error())
+					fmt.Printf("Error loading LiveConf file [%s]: %s\n", opts.LiveConf, err.Error())
 					continue
 				}
-				
+
 				oldDirs := opts.Watch.Basepath
 				opts.Watch = newOpts.Watch
+				fmt.Printf("Loading LiveConf file [%s]: %#v\n", opts.LiveConf, opts)
 				newDirs := make(map[string]bool)
 				for _, dirpath := range newOpts.Watch.Basepath {
 					newDirs[dirpath] = true
@@ -402,7 +405,7 @@ func InitBeanstalkd(opts Options) ([]beanstalkd.QueueHandler, error) {
 		}
 		qconf := beanstalkd.QueueConf{
 			Name:            opt.Queue,
-			TimeToRunMillis: opt.TimeToRunMillis,
+			TimeToRunMillis: uint32(opt.TimeToRunMillis),
 		}
 		qhand, err := conn.NewQueueHandler(qconf)
 		if err != nil {

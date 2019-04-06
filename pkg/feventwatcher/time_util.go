@@ -9,7 +9,7 @@ type cooldownTimer struct {
 	id              string
 	timeCreated     time.Time
 	timeUpdated     time.Time
-	countdownMillis uint64
+	countdownMillis int64
 	counter         uint32
 	data            interface{}
 	newData         chan interface{}
@@ -24,7 +24,7 @@ type CooldownTimer interface {
 }
 
 func NewCooldownTime(
-	id string, countdownMillis uint64,
+	id string, countdownMillis int64,
 	onDone func(data interface{}, counter uint32, timeCreated time.Time, timeUpdated time.Time)) (CooldownTimer, error) {
 
 	now := time.Now()
@@ -46,20 +46,20 @@ func NewCooldownTime(
 }
 
 func (t *cooldownTimer) coolingLoop() {
-	fmt.Printf("Start timerLoop countdown [%s]", t.id)
+	// fmt.Printf("Start timerLoop countdown [%s]", t.id)
 	for {
-		fmt.Println("Cooling Outter Loop")
+		// fmt.Println("Cooling Outter Loop")
 		select {
 		case <-t.notify:
 		CollingLoop:
 			for {
-				fmt.Println("Cooling Inner Loop")
+				// fmt.Println("Cooling Inner Loop")
 				select {
 				case <-time.After(time.Duration(t.countdownMillis) * time.Millisecond):
 					// Cool down enough
 					t.stop <- true
 					if t.data != nil {
-						fmt.Printf("Cooled countdown [%s]", t.id)
+						// fmt.Printf("Cooled countdown [%s]", t.id)
 						t.onDone(t.data, t.counter, t.timeCreated, t.timeUpdated)
 					}
 					defer t.Stop()
@@ -75,15 +75,15 @@ func (t *cooldownTimer) coolingLoop() {
 }
 
 func (t *cooldownTimer) dataLoop() {
-	fmt.Printf("Start dataLoop countdown [%s]", t.id)
+	// fmt.Printf("Start dataLoop countdown [%s]", t.id)
 	for {
-		fmt.Println("Data Loop")
+		// fmt.Println("Data Loop")
 		select {
 		case <-t.stop:
-			fmt.Printf("Stoping countdown [%s]", t.id)
+			// fmt.Printf("Stoping countdown [%s]", t.id)
 			return
 		case newData := <-t.newData:
-			fmt.Printf("New data on countdown [%s]", t.id)
+			// fmt.Printf("New data on countdown [%s]", t.id)
 			t.timeUpdated = time.Now()
 			t.counter = t.counter + 1
 			t.data = newData

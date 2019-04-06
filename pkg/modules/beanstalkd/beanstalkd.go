@@ -142,8 +142,6 @@ func (q *queue) Put(body []byte) (id uint64, err error) {
 		}
 	}
 
-	fmt.Printf("Nhe %#v\n", q.bTube)
-
 	return q.bTube.Put(body,
 		q.conf.Priority,
 		time.Duration(q.conf.DelayMillis)*time.Millisecond,

@@ -1,7 +1,9 @@
-watch:
-  basepath:
+Watch:
+  SubLevelsDepth: 2
+  Basepath:
     - /tmp
-    - /var/log
-  filter:
-    regexBlackList:
-      - BACKUP
+    - /home
+  Filter:
+    RegexWhiteList:
+      - .config
+      - tmp
