@@ -25,7 +25,7 @@ curl -XGET http://localhost:9123/health -I # check if its running
 
 ### Live config file
 
-You can optionaly provide a .yaml configuration file. Modifications on this you will be automaticaly applied on runing processes that are using the given configuration file. This overides all --watcher.* comand line args:
+You can optionaly provide a .yaml configuration file. Modifications on this file will be automaticaly applied on runing processes which are using the given configuration file. This overides all --watcher.* comand line args:
 
 *Linux*
 ```Shell
