@@ -23,6 +23,35 @@ curl -XGET http://localhost:9123/health -I # check if its running
 
 ## Usage
 
+### Live config file
+
+You can optionaly provide a .yaml configuration file. Modifications on this you will be automaticaly applied on runing processes that are using the given configuration file. This overides all --watcher.* comand line args:
+
+*Linux*
+```Shell
+feventwatcher [-c|--live-conf-file] sample-config.yaml  [OPTIONS]
+```
+
+*Windows*
+```Shell
+feventwatcher.exe [/c|/live-conf-file] sample-config.yaml  [OPTIONS]
+```
+
+*sample-config.yaml*
+```Yaml
+Watch:
+  SubLevelsDepth: 2
+  Basepath:
+    - /tmp
+    - /home
+  Filter:
+    RegexWhiteList:
+      - .config
+      - tmp
+```
+
+## Other command line arguments/options
+
 ```Shell
 $ bin/amd64/feventwatcher -h
 
