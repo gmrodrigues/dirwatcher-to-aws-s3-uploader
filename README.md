@@ -25,14 +25,17 @@ curl -XGET http://localhost:9123/health -I # check if its running
 
 ```Shell
 $ bin/amd64/feventwatcher -h
+
 Usage:
   feventwatcher [OPTIONS]
 
 Application Options:
+  -c, --live-conf-file=              Live config file path. Checked every second for updates. See file-conf.yaml.sample
   -d, --debug                        Debug mode, use multiple times to raise verbosity
 
 watch:
   -w, --watcher.basepath=            Basepath on local filesystem to watch events from. Can be set multiple times [$BASEPATH]
+  -l, --watcher.sublevels-depth=     Watch subdirectories n levels of depth from Basepath (default: 0) [$SUBLEVELS_DEPTH]
   -t, --watcher.cooldown-millis=     Cooldown milliseconds before notify watcher events (default: 1000) [$COOLDOWN_MILLIS]
   -r, --watcher.resource-name-depth= Use n levels of depth on file path as resource name (default: 4) [$RESOURCE_DEPTH]
   -x, --watcher.meta=                Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host, enviroment,
