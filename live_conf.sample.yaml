@@ -1,8 +1,7 @@
 Watch:
-  SubLevelsDepth: 2
+  SubLevelsDepth: 20
   Basepath:
-    - /tmp
-    - /home
+    - /var
   Filter:
     RegexWhiteList:
       - .config
