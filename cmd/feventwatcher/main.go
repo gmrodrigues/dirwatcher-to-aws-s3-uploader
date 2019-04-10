@@ -18,12 +18,18 @@ package main
 
 import (
 	"encoding/json"
+	"crypto/md5"
 	"fmt"
 	"os"
 	"path"
 	"strings"
 	"sync"
 	"time"
+	"bufio"
+	"bytes"
+	"os/exec"
+
+	"go.uber.org/zap"
 
 	"github.com/gmrodrigues/feventwatcher/pkg/feventwatcher"
 	"github.com/gmrodrigues/feventwatcher/pkg/modules/aws"
@@ -38,10 +44,13 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
+var logger *zap.Logger
+
 type Options struct {
 	LiveConf string `description:"Live config file path. Checked every second for updates. See file-conf.yaml.sample" long:"live-conf-file" short:"c"`
 	Watch    struct {
 		Basepath              []string `yaml:"Basepath" description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH"`
+		BasepathFindCmd       []string `yaml:"BasepathFindCmd" description:"A System Shell command wich will return one basepath per line. Can be set multiple times" short:"f" long:"basepath-find-cmd" env:"BASEPATH_FIND_CMD"`
 		SubLevelsDepth        int      `yaml:"SubLevelsDepth" description:"Watch subdirectories n levels of depth from Basepath" short:"l" long:"sublevels-depth" env:"SUBLEVELS_DEPTH" default:"0"`
 		CooldownMillis        int64    `yaml:"CooldownMillis" description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
 		ResourceNameFileDepth int      `yaml:"ResourceNameFileDepth" description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
@@ -50,6 +59,7 @@ type Options struct {
 			RegexBlackList []string `yaml:"RegexBlackList" description:"Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name." long:"blacklist" env:"WATCH_FILTER_BLACKLIST"`
 			RegexWhiteList []string `yaml:"RegexWhiteList" description:"Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name." long:"whitelist" env:"WATCH_FILTER_WHITELIST"`
 		} `yaml:"Filter" group:"filter" namespace:"filter"`
+		findCmdOut CmdOutput
 	} `yaml:"Watch" group:"watch" namespace:"watcher" env-namespace:"WATCH"`
 	DataDogAgent struct {
 		AgentAddr   string   `description:"DataDog agent address" long:"agent-address" env:"AGENT_ADDR" default:"127.0.0.1:8126"`
@@ -83,6 +93,11 @@ type Options struct {
 	Debug []bool `description:"Debug mode, use multiple times to raise verbosity" short:"d" long:"debug"`
 }
 
+type CmdOutput struct {
+	linesout []string
+	md5sum string
+}
+
 func checkMandatoryArgs(o Options) error {
 	hasBasePaths := false
 	var errMsgs []string
@@ -103,6 +118,9 @@ func checkMandatoryArgs(o Options) error {
 			hasBasePaths = true
 		}
 	}
+	if len(o.Watch.BasepathFindCmd) > 0 {
+		hasBasePaths = true
+	}
 	if !hasBasePaths {
 		errMsgs = append(errMsgs, "No basepaths found")
 	}
@@ -112,9 +130,20 @@ func checkMandatoryArgs(o Options) error {
 	return nil
 }
 
+func (o *Options) runFindCmd() (err error) {
+	for _, cmd := range o.Watch.BasepathFindCmd {
+		o.Watch.findCmdOut, err = exe_cmd(cmd)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func loadOptions(confFile string) (*Options, error) {
 	opts := &Options{}
 	err := configor.Load(opts, confFile)
+	
 	if len(opts.Watch.Basepath) < 1 {
 		return nil, fmt.Errorf("Cannot use conf file %s: no watch diretories found.\n %#v", confFile, opts)
 	}
@@ -125,24 +154,37 @@ type handleFunc func(pspan opentracing.Span, json []byte)
 
 func main() {
 	// runtime.GOMAXPROCS(runtime.NumCPU())
-	opts := Options{}
-	_, err := flags.ParseArgs(&opts, os.Args)
+	opts := &Options{}
+	_, err := flags.ParseArgs(opts, os.Args)
 
 	if err != nil {
 		if _, ok := err.(*flags.Error); !ok {
 			fmt.Println(err.Error())
 		}
 		os.Exit(-1)
-	} else if err = checkMandatoryArgs(opts); err != nil {
+	} else if err = checkMandatoryArgs(*opts); err != nil {
 		fmt.Println(err.Error())
 		fmt.Println("\nPlease refer to --help for help")
 		os.Exit(-1)
 	}
-	fmt.Println("Args accepted")
+ 
+	err = opts.runFindCmd()
+	if err != nil {
+		fmt.Printf(err.Error())
+	}
 
+	
+
+	logger, _ = zap.NewProduction()
 	debug := len(opts.Debug) > 0
+	if debug {
+		logger, _ = zap.NewDevelopment()
+	}
 
-	go Health(&opts)
+	logger.Info("Args accepted")
+	
+
+	go Health(opts)
 
 	tstartops := []tracer.StartOption{
 		tracer.WithAgentAddr(opts.DataDogAgent.AgentAddr),
@@ -159,17 +201,17 @@ func main() {
 	defer tracer.Stop()
 	opentracing.SetGlobalTracer(t)
 
-	bqueues, err := InitBeanstalkd(opts)
+	bqueues, err := InitBeanstalkd(*opts)
 	if err != nil {
 		panic(err)
 	}
 
-	rqueues, err := InitRedis(opts)
+	rqueues, err := InitRedis(*opts)
 	if err != nil {
 		panic(err)
 	}
 
-	squeues, err := InitSns(opts)
+	squeues, err := InitSns(*opts)
 	if err != nil {
 		panic(err)
 	}
@@ -247,7 +289,7 @@ func main() {
 	/////////////////////////////////
 	// Start Watcher
 
-	runtime := NewHealthStatus(&opts).Runtime
+	runtime := NewHealthStatus(opts).Runtime
 	handler := func(e *feventwatcher.WatcherEvent) {
 		span := t.StartSpan("watch.event.notify")
 		defer span.Finish()
@@ -290,7 +332,7 @@ func main() {
 	var wg sync.WaitGroup
 	watchers := make(map[string]feventwatcher.Watchable)
 
-	updateWatcher := func(basepath string, opts Options) {
+	updateWatcher := func(basepath string, opts *Options) {
 		w := watchers[basepath]
 		if w == nil {
 			return
@@ -307,7 +349,7 @@ func main() {
 		w.UpdateConf(conf)
 	}
 
-	startWatcher := func(basepath string, opts Options) {
+	startWatcher := func(basepath string, opts *Options) {
 		fmt.Printf("Start watcher on: %s", basepath)
 		if watchers[basepath] != nil {
 			updateWatcher(basepath, opts)
@@ -322,13 +364,13 @@ func main() {
 			RegexBlackList: opts.Watch.Filter.RegexBlackList,
 		}
 
-		w, err := feventwatcher.NewWatchable(conf)
+		w, err := feventwatcher.NewWatchable(conf, logger)
 		if err != nil {
-			fmt.Printf("Failed to start watcher: %s", err.Error())
+			fmt.Printf("Failed to start watcher: %s\n", err.Error())
 			return
 		}
 
-		fmt.Println("Starting watcher with confs: %#v", conf)
+		fmt.Printf("Starting watcher with confs: %#v\n", conf)
 		w.SubscribeFunc(handler)
 		wg.Add(1)
 		watchers[basepath] = w
@@ -336,6 +378,11 @@ func main() {
 			defer wg.Done()
 			w.Start()
 		}()
+	}
+
+	for _, basepath := range opts.Watch.findCmdOut.linesout {
+		//fmt.Printf("File %s\n", dirname)
+		startWatcher(basepath, opts)
 	}
 
 	for _, basepath := range opts.Watch.Basepath {
@@ -363,11 +410,19 @@ func main() {
 					continue
 				}
 
-				oldDirs := opts.Watch.Basepath
+				newOpts.runFindCmd()
+				oldDirs := opts.Watch.findCmdOut.linesout
+				for _, basedir := range opts.Watch.Basepath {
+					oldDirs = append(oldDirs, basedir)
+				}
 				opts.Watch = newOpts.Watch
 				fmt.Printf("Loading LiveConf file [%s]: %#v\n", opts.LiveConf, opts)
 				newDirs := make(map[string]bool)
 				for _, dirpath := range newOpts.Watch.Basepath {
+					newDirs[dirpath] = true
+					startWatcher(dirpath, opts)
+				}
+				for _, dirpath := range newOpts.Watch.findCmdOut.linesout {
 					newDirs[dirpath] = true
 					startWatcher(dirpath, opts)
 				}
@@ -454,3 +509,36 @@ func InitSns(opts Options) ([]*aws.SnsPublishPool, error) {
 	}
 	return pools, nil
 }
+
+func exe_cmd(cmd string) (CmdOutput, error) {
+	parts := strings.Fields(cmd)
+	head := parts[0]
+	parts = parts[1:len(parts)]
+
+	fmt.Printf("command is %s [%s] %#v\n", cmd, head, parts)
+	c := exec.Command(head, parts...)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	c.Stdout = &out
+	c.Stderr = &stderr
+	err := c.Run()
+	if err != nil {
+		fmt.Println(fmt.Sprint(err) + ": " + stderr.String())
+		return CmdOutput{}, err
+	}
+	fmt.Printf("Out is: %s", out)
+
+	scanner := bufio.NewScanner(bytes.NewReader(out.Bytes()))
+	list := make([]string, 0)
+	for scanner.Scan() {
+		list = append(list, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return CmdOutput{}, err
+	}
+	return CmdOutput{
+			linesout: list,
+			md5sum: fmt.Sprintf("%x", md5.Sum(out.Bytes())),
+		}, nil
+  }
