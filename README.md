@@ -40,14 +40,15 @@ feventwatcher.exe [/c|/live-conf-file] sample-config.yaml  [OPTIONS]
 *sample-config.yaml*
 ```Yaml
 Watch:
-  SubLevelsDepth: 2
   Basepath:
-    - /tmp
-    - /home
+    - /usr/bin
+  Discover:
+    CmdLines:
+      - "find /tmp -maxdepth 1 -type d"
   Filter:
     RegexWhiteList:
-      - .config
-      - tmp
+      - "^/root/[^/]+"
+      - "^(/[^/]+){1,5}"
 ```
 
 ## Other command line arguments/options
