@@ -1,8 +1,10 @@
 Watch:
-  SubLevelsDepth: 20
   Basepath:
-    - /var
+    - /usr/bin
+  Discover:
+    CmdLines:
+      - "find /tmp -maxdepth 1 -type d"
   Filter:
     RegexWhiteList:
-      - .config
-      - tmp
+      - "^/root/[^/]+"
+      - "^(/[^/]+){1,5}"

@@ -2,13 +2,10 @@ package feventwatcher
 
 import (
 	"fmt"
-	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -29,8 +26,8 @@ type EventCooldownConf struct {
 }
 
 type WatcherConf struct {
-	BaseDir        string
-	SubLevelsDepth int
+	BaseDir        []string
+	Discover       DiscoverConf
 	DotFiles       bool
 	RegexWhiteList []string
 	RegexBlackList []string
@@ -58,23 +55,13 @@ type CoolDownDone struct {
 	counter     uint32
 }
 
-type BaseFile struct {
-	NodeName string
-	Parent   *BaseFile
-	Children map[string]*BaseFile
-	mutex    *sync.Mutex
-	fullpath string
-}
-
 type Watcher struct {
 	conf        *WatcherConf
 	watcher     *fsnotify.Watcher
 	baseFileMap map[string]*BaseFile
 	filter      struct {
-		depthFileRexp *regexp.Regexp
-		depthDirRexp  *regexp.Regexp
-		regxpWL       []*regexp.Regexp
-		regxpBL       []*regexp.Regexp
+		regxpWL []*regexp.Regexp
+		regxpBL []*regexp.Regexp
 	}
 	done           chan bool
 	subs           []chan *WatcherEvent
@@ -111,24 +98,24 @@ func NewWatcherEventChan() chan *WatcherEvent {
 	return make(chan *WatcherEvent)
 }
 
-func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
+func NewWatchable(conf WatcherConf, loogger *zap.Logger) (wtb Watchable, err error) {
 	w := &Watcher{conf: &conf}
+	w.logger = loogger
 	err = w.UpdateConf(*w.conf)
 	if err != nil {
 		return nil, err
 	}
 
 	// init watcher
-	conf.BaseDir = normName(conf.BaseDir)
 	w.watcher, err = fsnotify.NewWatcher()
-	w.logger, _ = zap.NewProduction()
 	defer w.logger.Sync()
 	if err != nil {
-		// w.logger.Fatal(err.Error())
+		w.logger.Fatal(err.Error())
+		return
 	}
 	w.baseFileMap = make(map[string]*BaseFile)
 
-	EVENT_BUFFER_SIZE := 1024 * 100
+	EVENT_BUFFER_SIZE := 1024
 	w.subs = make([]chan *WatcherEvent, 0)
 	w.in = make(chan *File, EVENT_BUFFER_SIZE)
 	w.out = make(chan *CoolDownDone, EVENT_BUFFER_SIZE)
@@ -146,58 +133,13 @@ func NewWatchable(conf WatcherConf) (wtb Watchable, err error) {
 		}
 	}
 
-	err = w.AddBaseFile(w.conf.BaseDir)
-	if err != nil {
-		log.Fatal(err)
-		return nil, err
-	}
-
 	return w, nil
 }
 
-func newBaseFile(nodename string, parent *BaseFile) *BaseFile {
-	return &BaseFile{
-		NodeName: nodename,
-		Parent:   parent,
-		Children: make(map[string]*BaseFile),
-		mutex:    &sync.Mutex{},
-	}
-}
-
-func (b *BaseFile) addChildren(pathslices []string) error {
-	if len(pathslices) > 0 {
-		b.mutex.Lock()
-		defer b.mutex.Unlock()
-
-		childname := pathslices[0]
-		childbf := b.Children[childname]
-		if childbf == nil {
-			childbf = newBaseFile(childname, b)
-		}
-		b.Children[childname] = childbf
-		if len(pathslices) > 1 {
-			grandchildren := pathslices[1:]
-			childbf.addChildren(grandchildren)
-		}
-	}
-	return nil
-}
-
-func (b *BaseFile) Fullpath() string {
-	if b.fullpath == "" {
-		pathslices := []string{b.NodeName}
-		for parent := b.Parent; parent != nil; parent = parent.Parent {
-			pathslices = append([]string{parent.NodeName}, pathslices...)
-		}
-		b.fullpath = strings.Join(pathslices, "/")
-	}
-
-	return b.fullpath
-}
-
 func (w *Watcher) AddBaseFile(filepath string) error {
-	norm := normName(filepath)
-	pathslices := strings.Split(filepath, "/")
+
+	norm := NormName(filepath)
+	pathslices := strings.Split(norm, "/")
 	rootnodename := pathslices[0]
 	rootbf := w.baseFileMap[rootnodename]
 	if rootbf == nil {
@@ -207,10 +149,31 @@ func (w *Watcher) AddBaseFile(filepath string) error {
 	if len(pathslices) > 1 {
 		rootbf.addChildren(pathslices[1:])
 	}
+
 	w.pushed <- norm
-	w.logger.Info(fmt.Sprintf("[Basefile] Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, norm))
+	w.logger.Info(fmt.Sprintf("[Basefile] Pushing file: %s", norm))
 
 	return nil
+}
+
+func (w *Watcher) DecomposePath(normFilePath string) (basepath string, relative string) {
+	pathslices := strings.Split(normFilePath, "/")
+	rootnodename := pathslices[0]
+	rootbf := w.baseFileMap[rootnodename]
+	if rootbf != nil && len(pathslices) > 1 {
+		basenode := rootbf
+		lastnode := rootbf
+		for basenode != nil && len(pathslices) > 1 {
+			pathslices = pathslices[1:]
+			nodename := pathslices[0]
+			lastnode = basenode
+			basenode = basenode.Children[nodename]
+		}
+
+		return lastnode.Fullpath(), strings.Join(pathslices, "/")
+	}
+
+	return "", normFilePath
 }
 
 func (e *WatcherEvent) Watcher() *Watcher {
@@ -226,12 +189,16 @@ func (w *Watcher) Done() error {
 	}
 }
 
+func NormName(filename string) string {
+	return filepath.ToSlash(filepath.Clean(filename))
+}
+
 func (w *Watcher) Start() error {
 	defer w.logger.Sync()
 	defer w.watcher.Close()
 
 	handle := func(filename string, forced bool) error {
-		normName := normName(filename)
+		normName := NormName(filename)
 
 		if len(filename) == 0 {
 			return fmt.Errorf("Empty file name received")
@@ -257,7 +224,7 @@ func (w *Watcher) Start() error {
 	}
 
 	go w.cooldownNotifyLoop()
-	go w.walkPush(w.conf.BaseDir)
+	go w.discoverCmdLoop()
 
 	for {
 		w.logger.Debug("Main Loop")
@@ -289,37 +256,23 @@ func (w *Watcher) Start() error {
 	}
 }
 
-func normName(filename string) string {
-	return filepath.ToSlash(filepath.Clean(filename))
-}
-
 func (w *Watcher) walkPush(path string) {
-	path = normName(path)
+	path = NormName(path)
 	if w.ForcePushFile(path) {
 		globStr := filepath.Join(path, "*")
 		globs, _ := filepath.Glob(globStr)
 		if len(globs) > 0 {
-			w.logger.Info(fmt.Sprintf("[Start] Walking and Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, path))
-			defer w.logger.Info(fmt.Sprintf("[Done]  Walking and Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, path))
+			w.logger.Info(fmt.Sprintf("[Start] Walking and Pushing file: %s", path))
+			defer w.logger.Info(fmt.Sprintf("[Done]  Walking and Pushing file: %s", path))
 
 			for _, subPath := range globs {
-				normSubPath := normName(subPath)
-				go w.walkPush(normSubPath)
+				normSubPath := NormName(subPath)
+				w.walkPush(normSubPath)
 			}
 		}
 	}
 
 	return
-}
-
-func (w *Watcher) isFilePathTooDeep(normName string) bool {
-	// in a subdirectory too deep
-	return !w.filter.depthFileRexp.MatchString(normName)
-}
-
-func (w *Watcher) isDirPathTooDeep(normName string) bool {
-	// in a subdirectory too deep
-	return !w.filter.depthDirRexp.MatchString(normName)
 }
 
 func (w *Watcher) acceptedByFilters(normName string) bool {
@@ -374,18 +327,14 @@ func (w *Watcher) cooldownNotifyLoop() {
 
 		stat, stat_err := os.Stat(file.NormName)
 		file.Exists = !os.IsNotExist(stat_err)
-		rel, _ := filepath.Rel(w.conf.BaseDir, file.NormName)
 		s := FileInfo{
 			Version: FILEINFO_FORMAT_VERSION,
-			Name:    rel,
-			Base:    w.conf.BaseDir,
 		}
+
 		if file.Exists && stat != nil {
 			file.IsDir = stat.IsDir()
 			s = FileInfo{
 				Version: FILEINFO_FORMAT_VERSION,
-				Name:    rel, // relative name of the file
-				Base:    w.conf.BaseDir,
 				Size:    stat.Size(),    // length in bytes for regular files; system-dependent for others
 				Mode:    stat.Mode(),    // file mode bits
 				ModTime: stat.ModTime(), // modification time
@@ -393,17 +342,13 @@ func (w *Watcher) cooldownNotifyLoop() {
 			}
 		}
 
-		if w.isFilePathTooDeep(file.NormName) {
-			w.logger.Info(fmt.Sprintf("Not accepted by depth[%v]: %s [is_dir=%v]", w.conf.SubLevelsDepth, file.NormName, file.IsDir))
-			w.watcher.Remove(file.NormName)
-			return
-		}
-
 		if !w.acceptedByFilters(file.NormName) {
 			w.logger.Info(fmt.Sprintf("Not accepted by filters %s", file.NormName))
 			w.watcher.Remove(file.NormName)
 			return
 		}
+
+		s.Base, s.Name = w.DecomposePath(file.NormName)
 
 		e := &WatcherEvent{
 			Version:     EVENT_FORMAT_VERSION,
@@ -441,26 +386,13 @@ func (w *Watcher) cooldownNotifyLoop() {
 }
 
 func (w *Watcher) ForcePushFile(filename string) (success bool) {
-	if w.acceptedByFilters(filename) {
-		if stat, err := os.Stat(filename); err == nil {
-			dirDeepOK := stat.IsDir() && !w.isDirPathTooDeep(filename)
-			fileDeepOK := !stat.IsDir() && !w.isFilePathTooDeep(filename)
-
-			if dirDeepOK || fileDeepOK {
-				w.pushed <- filename
-				w.logger.Info(fmt.Sprintf("[Force] Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, filename))
-				return true
-			} else if stat.IsDir() {
-				w.logger.Debug(fmt.Sprintf("[No-op] Not Pushing deep[%v] directory: %s", w.conf.SubLevelsDepth, filename))
-				return false
-			} else {
-				w.logger.Debug(fmt.Sprintf("[No-op] Not Pushing deep[%v] file: %s", w.conf.SubLevelsDepth, filename))
-				return false
-			}
-		}
+	if _, err := os.Stat(filename); err == nil {
+		w.pushed <- filename
+		w.logger.Info(fmt.Sprintf("[Force] Pushing file: %s", filename))
+		return true
 	}
 
-	w.logger.Debug(fmt.Sprintf("[No-op] Not Pushing deep[%v] unknown file: %s", w.conf.SubLevelsDepth, filename))
+	w.logger.Debug(fmt.Sprintf("[No-op] Not Pushing unknown file: %s", filename))
 	return false
 }
 
@@ -469,25 +401,10 @@ func (w *Watcher) Conf() WatcherConf {
 }
 
 func (w *Watcher) UpdateConf(conf WatcherConf) error {
+	w.conf.Discover = conf.Discover
 	w.conf.Cooldown.CounterMillis = conf.Cooldown.CounterMillis
 	w.conf.RegexWhiteList = conf.RegexWhiteList
 	w.conf.RegexBlackList = conf.RegexBlackList
-	w.conf.SubLevelsDepth = conf.SubLevelsDepth
-
-	setSubLevelsRegexp := func(basepath string, levels int) {
-		abs, _ := filepath.Abs(basepath)
-		pathCrumbs := strings.Split(path.Clean(abs), "/")
-		first := "[^/]+"
-		if pathCrumbs[0] == "" {
-			first = "/[^/]+"
-		}
-		pathCrumbs = pathCrumbs[1:]
-		totalLevels := levels + len(pathCrumbs)
-
-		w.filter.depthFileRexp, _ = regexp.Compile(fmt.Sprintf("^%s(/[^/]+){0,%v}$", first, totalLevels))
-		w.filter.depthDirRexp, _ = regexp.Compile(fmt.Sprintf("^%s(/[^/]+){0,%v}$", first, totalLevels-1))
-	}
-	setSubLevelsRegexp(w.conf.BaseDir, w.conf.SubLevelsDepth)
 
 	//init black and white lists
 	for _, s := range w.conf.RegexWhiteList {
@@ -505,6 +422,12 @@ func (w *Watcher) UpdateConf(conf WatcherConf) error {
 		}
 		w.filter.regxpBL = append(w.filter.regxpBL, r)
 	}
+
+	for _, basefile := range conf.BaseDir {
+		w.AddBaseFile(basefile)
+		w.walkPush(basefile)
+	}
+	w.conf.BaseDir = conf.BaseDir
 
 	return nil
 }

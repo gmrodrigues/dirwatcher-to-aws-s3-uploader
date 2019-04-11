@@ -59,55 +59,60 @@ Usage:
   feventwatcher [OPTIONS]
 
 Application Options:
-  -c, --live-conf-file=              Live config file path. Checked every second for updates. See file-conf.yaml.sample
-  -d, --debug                        Debug mode, use multiple times to raise verbosity
+  -c, --live-conf-file=                  Live config file path. Checked every second for updates. See file-conf.yaml.sample
+  -d, --debug                            Debug mode, use multiple times to raise verbosity
 
 watch:
-  -w, --watcher.basepath=            Basepath on local filesystem to watch events from. Can be set multiple times [$BASEPATH]
-  -l, --watcher.sublevels-depth=     Watch subdirectories n levels of depth from Basepath (default: 0) [$SUBLEVELS_DEPTH]
-  -t, --watcher.cooldown-millis=     Cooldown milliseconds before notify watcher events (default: 1000) [$COOLDOWN_MILLIS]
-  -r, --watcher.resource-name-depth= Use n levels of depth on file path as resource name (default: 4) [$RESOURCE_DEPTH]
-  -x, --watcher.meta=                Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host, enviroment,
-                                     etc) [$WATCH_META]
+  -w, --watcher.basepath=                Basepath on local filesystem to watch events from. Can be set multiple times [$BASEPATH]
+  -t, --watcher.cooldown-millis=         Cooldown milliseconds before notify watcher events (default: 1000) [$COOLDOWN_MILLIS]
+  -r, --watcher.resource-name-depth=     Use n levels of depth on file path as resource name (default: 4) [$RESOURCE_DEPTH]
+  -x, --watcher.meta=                    Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host,
+                                         enviroment, etc) [$WATCH_META]
+
+find:
+  -f, --watcher.discover.cmd-line=       A System Shell command line wich will return one basepath per line. Can be set multiple times
+                                         [$WATCH_DISCOVER_CMD_LINE]
+  -z, --watcher.discover.refresh-millis= Refresh milliseconds before running find command again to discover new basepaths. Disabled => 0 (default: 0)
+                                         [$WATCH_DISCOVER_REFRESH_MILLIS]
 
 filter:
-      --watcher.filter.blacklist=    Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name.
-                                     [$WATCH_FILTER_BLACKLIST]
-      --watcher.filter.whitelist=    Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name.
-                                     [$WATCH_FILTER_WHITELIST]
+      --watcher.filter.blacklist=        Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name.
+                                         [$WATCH_FILTER_BLACKLIST]
+      --watcher.filter.whitelist=        Can be set multiple times. Regex to (second priority) whitelist file events based on full normalized name.
+                                         [$WATCH_FILTER_WHITELIST]
 
 ddagent:
-      --dd.agent-address=            DataDog agent address (default: 127.0.0.1:8126) [$AGENT_ADDR]
-      --dd.trace-service-name=       DataDog service name (default: feventwatcher)
-      --dd.trace-env=                DataDog application enviroment
-      --dd.xtag=                     Additional multiple ddtrace tags Ex: --xtag aws_region=virginia
+      --dd.agent-address=                DataDog agent address (default: 127.0.0.1:8126) [$AGENT_ADDR]
+      --dd.trace-service-name=           DataDog service name (default: feventwatcher)
+      --dd.trace-env=                    DataDog application enviroment
+      --dd.xtag=                         Additional multiple ddtrace tags Ex: --xtag aws_region=virginia
 
 beanstalkd:
-      --beanstalkd.addr=             Beanstalkd (queue server) host:port (Ex: 127.0.0.1:11300) [$BEANSTALKD_ADDR]
-      --beanstalkd.queue=            Beanstalkd queue name) (default: default) [$BEANSTALKD_QUEUE]
-      --beanstalkd.ttr=              Beanstalkd queue consumer\'s time to work before job return to queue) (default: 600000) [$BEANSTALKD_TTR]
+      --beanstalkd.addr=                 Beanstalkd (queue server) host:port (Ex: 127.0.0.1:11300) [$BEANSTALKD_ADDR]
+      --beanstalkd.queue=                Beanstalkd queue name) (default: default) [$BEANSTALKD_QUEUE]
+      --beanstalkd.ttr=                  Beanstalkd queue consumer\'s time to work before job return to queue) (default: 600000) [$BEANSTALKD_TTR]
 
 redis:
-      --redis.addr=                  Redis server host:port (Ex: localhost:6379) [$REDIS_ADDR]
-      --redis.password=              Redis server password [$REDIS_PASSWORD]
-      --redis.queue-key=             Redis queue name (default: fsevents:queue) [$REDIS_QUEUE]
-      --redis.db=                    Redis DB number (default: 0) [$REDIS_DB]
+      --redis.addr=                      Redis server host:port (Ex: localhost:6379) [$REDIS_ADDR]
+      --redis.password=                  Redis server password [$REDIS_PASSWORD]
+      --redis.queue-key=                 Redis queue name (default: fsevents:queue) [$REDIS_QUEUE]
+      --redis.db=                        Redis DB number (default: 0) [$REDIS_DB]
 
 aws:
-      --aws.access-key-id=           Specifies an AWS access key associated with an IAM user or role. [$AWS_ACCESS_KEY_ID]
-      --aws.secred-access-key=       Specifies the secret key associated with the access key. This is essentially the 'password' for the access key.
-                                     [$AWS_SECRET_ACCESS_KEY]
+      --aws.access-key-id=               Specifies an AWS access key associated with an IAM user or role. [$AWS_ACCESS_KEY_ID]
+      --aws.secred-access-key=           Specifies the secret key associated with the access key. This is essentially the 'password' for the access
+                                         key. [$AWS_SECRET_ACCESS_KEY]
 
 sns:
-      --aws.sns.topic-arn=           AWS SNS topic arn to send events to. Can be set multiple times. [$AWS_SNS_TOPIC_ARN]
-      --aws.sns.pool-size=           AWS SNS concurrent connections for pushing (default: 25) [$AWS_SNS_POOL_SIZE]
-      --aws.sns.timout-seconds=      AWS SNS publish timout (default: 5) [$AWS_SNS_TIMEOUT_SECONDS]
+      --aws.sns.topic-arn=               AWS SNS topic arn to send events to. Can be set multiple times. [$AWS_SNS_TOPIC_ARN]
+      --aws.sns.pool-size=               AWS SNS concurrent connections for pushing (default: 25) [$AWS_SNS_POOL_SIZE]
+      --aws.sns.timout-seconds=          AWS SNS publish timout (default: 5) [$AWS_SNS_TIMEOUT_SECONDS]
 
 health:
-  -p, --health.port=                 Listen on port for healh check status report (GET /health) [$HEALTH_PORT]
+  -p, --health.port=                     Listen on port for healh check status report (GET /health) [$HEALTH_PORT]
 
 Help Options:
-  -h, --help                         Show this help message
+  -h, --help                             Show this help message
 ```
 
 ## Building
