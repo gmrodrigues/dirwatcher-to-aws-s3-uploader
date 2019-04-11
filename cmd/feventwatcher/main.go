@@ -47,8 +47,8 @@ type Options struct {
 		Basepaths []string `yaml:"Basepath" description:"Basepath on local filesystem to watch events from. Can be set multiple times" short:"w" long:"basepath" env:"BASEPATH"`
 		Discover  struct {
 			CmdLines      []string `yaml:"CmdLines" description:"A System Shell command line wich will return one basepath per line. Can be set multiple times" short:"f" long:"cmd-line" env:"WATCH_DISCOVER_CMD_LINE"`
-			RefreshMillis int64    `yaml:"RefreshMillis" description:"Refresh milliseconds before running find command again to discover new basepaths. Disabled => 0" short:"z" long:"refresh-millis" env:"WATCH_DISCOVER_REFRESH_MILLIS" default:"0"`
-		} `yaml:"Discover" group:"find" namespace:"discover"`
+			RefreshMillis int64    `yaml:"RefreshMillis" description:"Refresh milliseconds before running discovery command again to discover new basepaths. Disabled => 0" short:"z" long:"refresh-millis" env:"WATCH_DISCOVER_REFRESH_MILLIS" default:"0"`
+		} `yaml:"Discover" group:"discover" namespace:"discover"`
 		CooldownMillis        int64  `yaml:"CooldownMillis" description:"Cooldown milliseconds before notify watcher events" short:"t" long:"cooldown-millis" env:"COOLDOWN_MILLIS" default:"1000"`
 		ResourceNameFileDepth int    `yaml:"ResourceNameFileDepth" description:"Use n levels of depth on file path as resource name" short:"r" long:"resource-name-depth" env:"RESOURCE_DEPTH" default:"4"`
 		Meta                  string `yaml:"Meta" description:"Metadata to add to all event message body {\"Meta\":\"...\"} (use this to pass extra data about host, enviroment, etc)" short:"x" long:"meta" env:"WATCH_META"`
