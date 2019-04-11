@@ -69,11 +69,11 @@ watch:
   -x, --watcher.meta=                    Metadata to add to all event message body {"Meta":"..."} (use this to pass extra data about host,
                                          enviroment, etc) [$WATCH_META]
 
-find:
+discover:
   -f, --watcher.discover.cmd-line=       A System Shell command line wich will return one basepath per line. Can be set multiple times
                                          [$WATCH_DISCOVER_CMD_LINE]
-  -z, --watcher.discover.refresh-millis= Refresh milliseconds before running find command again to discover new basepaths. Disabled => 0 (default: 0)
-                                         [$WATCH_DISCOVER_REFRESH_MILLIS]
+  -z, --watcher.discover.refresh-millis= Refresh milliseconds before running discovery command again to discover new basepaths. Disabled => 0
+                                         (default: 0) [$WATCH_DISCOVER_REFRESH_MILLIS]
 
 filter:
       --watcher.filter.blacklist=        Can be set multiple times. Regex to (first priority) blacklist file events based on full normalized name.
