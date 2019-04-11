@@ -43,6 +43,7 @@ Watch:
   Basepath:
     - /usr/bin
   Discover:
+    RefreshMillis: 30000
     CmdLines:
       - "find /tmp -maxdepth 1 -type d"
   Filter:
