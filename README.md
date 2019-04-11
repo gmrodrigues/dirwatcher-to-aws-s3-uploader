@@ -142,8 +142,20 @@ to push the container images for all architectures.
 
 Run `make clean` to clean up.
 
-## Create Windows Service
+## Tips & Tricks
+
+### Create Windows Service
 
 We recoment using https://nssm.cc/
  - [Download](https://nssm.cc/download)
  - [Usage](https://nssm.cc/usage)
+
+### Limit memory usage on Windows
+
+#### Process Governor
+
+This application allows you to set constraints on a process. It uses a job object for this purpose.
+
+  - https://github.com/lowleveldesign/process-governor
+
+

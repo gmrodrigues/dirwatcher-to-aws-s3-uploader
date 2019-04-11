@@ -86,14 +86,20 @@ func (w *Watcher) discoverCmdLoop() {
 
 	w.addCmdOuputToBasefiles()
 
-	if w.conf.Discover.RefreshMillis > 0 {
-		for {
-			select {
-			case <-w.done:
-				defer w.Done()
-				return
-			case <-time.After(time.Duration(w.conf.Discover.RefreshMillis) * time.Millisecond):
-				w.addCmdOuputToBasefiles()
+	for {
+		select {
+		case <-w.done:
+			defer w.Done()
+			return
+		case <-time.After(time.Duration(1) * time.Second):
+			if w.conf.Discover.RefreshMillis > 0 {
+				select {
+				case <-w.done:
+					defer w.Done()
+					return
+				case <-time.After(time.Duration(w.conf.Discover.RefreshMillis) * time.Millisecond):
+					w.addCmdOuputToBasefiles()
+				}
 			}
 		}
 	}
