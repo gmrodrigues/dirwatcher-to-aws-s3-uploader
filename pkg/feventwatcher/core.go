@@ -301,25 +301,10 @@ func (w *Watcher) acceptedByFilters(normName string) bool {
 
 func (w *Watcher) cooldownNotifyLoop() {
 
-	handleIn := func(file *File) {
-
-		w.watcher.Add(file.NormName)
-
-		ce := w.coolingEvents[file.NormName]
-		if ce == nil {
-			cc := w.conf.Cooldown
-			ce, _ = NewCooldownTime(
-				fmt.Sprintf("cooldown:%s", file.Name),
-				cc.CounterMillis,
-				w.onCoolDownDone)
-			w.coolingEvents[file.NormName] = ce
-		}
-		ce.NewData() <- file
-	}
-
 	notify := func(we *WatcherEvent, s chan *WatcherEvent) {
 		s <- we
 	}
+
 	handleOut := func(cdd *CoolDownDone) {
 
 		file := cdd.file
@@ -340,6 +325,10 @@ func (w *Watcher) cooldownNotifyLoop() {
 				ModTime: stat.ModTime(), // modification time
 				Sys:     stat.Sys(),     // underlying data source (can return nil)
 			}
+		}
+
+		if file.Forced && file.IsDir {
+			w.logger.Info(fmt.Sprintf("Forced dir will not be notified: %s", file.NormName))
 		}
 
 		if !w.acceptedByFilters(file.NormName) {
@@ -364,6 +353,32 @@ func (w *Watcher) cooldownNotifyLoop() {
 		for i, sub := range w.subs {
 			w.logger.Debug(fmt.Sprintf("Nofify Loop %v", i))
 			go notify(e, sub)
+		}
+	}
+
+	handleIn := func(file *File) {
+
+		w.watcher.Add(file.NormName)
+
+		if file.Forced {
+			now := time.Now()
+			handleOut(&CoolDownDone{
+				file:        file,
+				timeCreated: now,
+				timeUpdated: now,
+				counter:     1,
+			})
+		} else {
+			ce := w.coolingEvents[file.NormName]
+			if ce == nil {
+				cc := w.conf.Cooldown
+				ce, _ = NewCooldownTime(
+					fmt.Sprintf("cooldown:%s", file.Name),
+					cc.CounterMillis,
+					w.onCoolDownDone)
+				w.coolingEvents[file.NormName] = ce
+			}
+			ce.NewData() <- file
 		}
 	}
 
