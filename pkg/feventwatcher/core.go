@@ -329,6 +329,7 @@ func (w *Watcher) cooldownNotifyLoop() {
 
 		if file.Forced && file.IsDir {
 			w.logger.Info(fmt.Sprintf("Forced dir will not be notified: %s", file.NormName))
+			return
 		}
 
 		if !w.acceptedByFilters(file.NormName) {
